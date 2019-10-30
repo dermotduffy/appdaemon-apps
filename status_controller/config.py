@@ -28,7 +28,7 @@ ARGS_FOR_TURN_ON = [
 ]
 
 # Allowable attributes retrieved from state that can be used for turn on.
-ARGS_FOR_TURN_ON = [
+ATTR_ARGS_FOR_TURN_ON = [
     KEY_TRANSITION,
     'profile',
     'rgb_color',

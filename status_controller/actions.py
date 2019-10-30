@@ -56,13 +56,6 @@ class ActionBase(object):
     self._is_finished = True
     self._complete_callback(self)
 
-  def _sanitize_args(self, ref, **kwargs):
-    output = {}
-    for arg in kwargs:
-      if arg in ref:
-        output[arg] = kwargs[arg]
-    return output
-
   def _pop_argument(self, argument, default=None):
     return self._kwargs.pop(argument, default)
 
@@ -290,6 +283,13 @@ class LightActionBase(TimedActionBase):
     self._entity_id = entity_id
     self._prior_state = prior_state
 
+  def _sanitize_args(self, ref, **kwargs):
+    output = {}
+    for arg in kwargs:
+      if arg in ref:
+        output[arg] = kwargs[arg]
+    return output
+
   def _toggle(self):
     scc.log(self._app, self, 'Toggling: %s (%s)' % (
         self._entity_id, self._kwargs))
@@ -341,7 +341,7 @@ class LightActionBase(TimedActionBase):
     if state.get(scc.KEY_STATE) == 'on':
       self._turn_on_with_args(
           **self._sanitize_args(
-              ref=scc.ARGS_FOR_TURN_ON,
+              ref=scc.ATTR_ARGS_FOR_TURN_ON,
               **state.get(scc.KEY_ATTRIBUTES)))
     elif state.get(scc.KEY_STATE) == 'off':
       self._turn_off_with_args(**state.get(scc.KEY_ATTRIBUTES))
