@@ -37,6 +37,10 @@ class ActionBase(object):
 
     self._priority = self._pop_argument(scc.CONF_PRIORITY)
 
+    # kill_action() may be called from a different thread, so lock
+    # protect the underlying _complete_action and _is_finished as appropriate.
+    self._lock = threading.RLock()
+
   def get_priority(self):
     return self._priority
 
@@ -54,21 +58,18 @@ class ActionBase(object):
 
   def _complete_action(self, force=False):
     """Complete any post-action steps."""
-    if self._is_finished:
-      return
-
-    # TODO: Locking.
-    self._is_finished = True
+    with self._lock:
+      if self._is_finished:
+        return
+      self._is_finished = True
     self._complete_callback(self)
 
   def _pop_argument(self, argument, default=None):
     return self._kwargs.pop(argument, default)
 
   def is_finished(self):
-    return self._is_finished
-
-  def _do_finish_action(self):
-    pass
+    with self._lock:
+      return self._is_finished
 
 
 class TimedActionBase(ActionBase):
@@ -80,11 +81,12 @@ class TimedActionBase(ActionBase):
 
   def _complete_action(self, force=False):
     """Complete any post-action steps."""
-    if self._is_finished:
-      return
-    if self._complete_timer_handle is not None:
-      self._cancel_timer(self._complete_timer_handle)
-      self._complete_timer_handle = None
+    with self._lock:
+      if self._is_finished:
+        return
+      if self._complete_timer_handle is not None:
+        self._cancel_timer(self._complete_timer_handle)
+        self._complete_timer_handle = None
     super()._complete_action(force=force)
 
   def _schedule_action_complete(self):
@@ -112,8 +114,9 @@ class SonosAction(TimedActionBase):
     return self._entity_id == self._primary
 
   def _complete_action(self, force=False):
-    if self._is_finished:
-      return
+    with self._lock:
+      if self._is_finished:
+        return
     if self._is_primary() and force:
       self._stop_media()
     super()._complete_action(force=force)
@@ -180,11 +183,12 @@ class SonosTTSAction(SonosAction):
     self._speak_timer_handle = None
 
   def _complete_action(self, force=False):
-    if self._is_finished:
-      return
-    if self._speak_timer_handle:
-      self._cancel_timer(self._speak_timer_handle)
-      self._speak_timer_handle = None
+    with self._lock:
+      if self._is_finished:
+        return
+      if self._speak_timer_handle:
+        self._cancel_timer(self._speak_timer_handle)
+        self._speak_timer_handle = None
     super()._complete_action(force=force)
 
   def action(self):
@@ -283,8 +287,9 @@ class LightActionBase(TimedActionBase):
     return self._turn_off_with_args(**self._kwargs)
 
   def _complete_action(self, force=False):
-    if self._is_finished:
-      return
+    with self._lock:
+      if self._is_finished:
+        return
     if not force:
       self._do_finish_action()
     super()._complete_action(force=force)
@@ -300,10 +305,12 @@ class LightActionBase(TimedActionBase):
       super()._do_finish_action()
 
   def _restore_state(self):
-    state = self._prior_state
-    if state is None:
-      return
-    self._prior_state = None
+    with self._lock:
+      state = self._prior_state
+      if state is None:
+        return
+      self._prior_state = None
+
     if state.get(scc.KEY_STATE) == 'on':
       self._turn_on_with_args(
           **self._sanitize_args(
@@ -362,9 +369,10 @@ class BreathingLightAction(LightActionBase):
         self._beat_length, **{})
 
   def _complete_action(self, force=False):
-    if self._is_finished:
-      return
-    self._cancel_breathe_timer()
+    with self._lock:
+      if self._is_finished:
+        return
+      self._cancel_breathe_timer()
     super()._complete_action(force=force)
 
   def _cancel_breathe_timer(self):
