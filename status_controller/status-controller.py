@@ -46,6 +46,9 @@ class StatusController(threading.Thread):
     super().__init__(*args, **kwargs)
     self._app = app
     self._config = config
+    self._underlying_light_entities = config.get(
+        scc.CONF_UNDERLYING_ENTITIES, {}).get(
+        scc.CONF_LIGHT, {})
 
     self._cv = threading.Condition()
     self._events = []
@@ -250,7 +253,6 @@ class StatusController(threading.Thread):
 
       if self._is_sonos_action(action):
         has_sonos_action = True
-    self._app.log('To execute, groups: %s' % execution_groups)
 
     if has_sonos_action and not self._captured_global_sonos_state:
       # Capture global state, rather than doing it per-entity. As we cannot
@@ -276,8 +278,13 @@ class StatusController(threading.Thread):
       for domain in [scc.CONF_SONOS, scc.CONF_LIGHT]:
         if domain in output:
           for entity_set in output[domain]:
-            for entity in entity_set.get(scc.CONF_ENTITIES):
-              entities.add(entity[scc.CONF_ENTITY_ID])
+            for entity_id in entity_set.get(scc.CONF_ENTITIES):
+              if (domain == scc.CONF_LIGHT and
+                  entity_id in self._underlying_light_entities):
+                entities = entities.union(set(self._underlying_light_entities[
+                    entity_id]))
+              else:
+                entities.add(entity_id)
     return entities
 
   def _get_sonos_primary(self, group_entities):
@@ -302,9 +309,7 @@ class StatusController(threading.Thread):
           tmp = filtered_args.items()
           group_key = frozenset(filtered_args.items())
 
-          for entity in arguments.get(scc.CONF_ENTITIES):
-            entity_id = entity[scc.CONF_ENTITY_ID]
-
+          for entity_id in arguments.get(scc.CONF_ENTITIES):
             # Only invoke the 1st action that involves this entity in this event.
             if entity_id in visited_entity_ids:
               continue
@@ -336,7 +341,7 @@ class StatusController(threading.Thread):
         if key not in scc.SONOS_GROUP_IGNORE_KEYS}
 
   def _create_light_actions(self, event, outputs):
-    visited_entity_ids = []
+    visited_entity_ids = set()
     light_actions = []
 
     for output in outputs:
@@ -344,13 +349,21 @@ class StatusController(threading.Thread):
         for light in output.get(scc.CONF_LIGHT):
           arguments = scc.get_event_arguments(
               self._config, event, light, scc.CONF_LIGHT)
-          for entity in arguments.pop(scc.CONF_ENTITIES):
-            entity_id = entity[scc.CONF_ENTITY_ID]
+          for entity_id in arguments.pop(scc.CONF_ENTITIES):
+            if entity_id in self._underlying_light_entities:
+              underlying_entity_ids = set(self._underlying_light_entities[entity_id])
+            else:
+              underlying_entity_ids = set([entity_id])
 
-            # Only invoke the 1st action that involves this entity in this event.
-            if entity_id in visited_entity_ids:
+            # Only invoke the 1st action that involves this entity in this event
+            revisited_entity_ids = visited_entity_ids.intersection(
+                underlying_entity_ids)
+            if revisited_entity_ids:
+              self._app.log(
+                  'Entities (%s) feature multiple times for event: %s' % (
+                  revisited_entity_ids, event))
               continue
-            visited_entity_ids.append(entity_id)
+            visited_entity_ids = visited_entity_ids.union(underlying_entity_ids)
 
             action_cls = actions.LIGHT_ACTION_MAP[arguments.get(scc.CONF_ACTION)]
             if not action_cls:
@@ -359,11 +372,6 @@ class StatusController(threading.Thread):
             prior_state = self._captured_light_state.get(entity_id, {})
 
             if not prior_state:
-              if scc.CONF_UNDERLYING_ENTITY_IDS in entity:
-                underlying_entity_ids = entity[scc.CONF_UNDERLYING_ENTITY_IDS]
-              else:
-                underlying_entity_ids = [entity_id]
-
               for underlying_entity_id in underlying_entity_ids:
                 entity_state = actions.LightActionBase.capture_state(
                     self._app, underlying_entity_id)
@@ -374,7 +382,8 @@ class StatusController(threading.Thread):
                 self._app, self._report_action_finished,
                 entity_id, prior_state, **arguments)
 
-            self._entity_to_action[entity_id] = action
+            for underlying_entity_id in underlying_entity_ids:
+              self._entity_to_action[underlying_entity_id] = action
             light_actions.append(action)
 
     return light_actions

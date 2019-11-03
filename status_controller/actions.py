@@ -269,18 +269,20 @@ class LightActionBase(TimedActionBase):
       self._turn_on()
 
   def _turn_on_with_args(self, entity_id=None, **kwargs):
+    entity_id = entity_id or self._entity_id
     scc.log(self._app, self, 'Turning on: %s (%s)' % (entity_id, kwargs))
     self._app.turn_on(
-        entity_id or self._entity_id,
+        entity_id,
         **(self._sanitize_args(ref=scc.ARGS_FOR_TURN_ON, **kwargs)))
 
   def _turn_on(self):
     return self._turn_on_with_args(**self._kwargs)
 
   def _turn_off_with_args(self, entity_id=None, **kwargs):
+    entity_id = entity_id or self._entity_id
     scc.log(self._app, self, 'Turning off: %s (%s)' % (entity_id, kwargs))
     self._app.turn_off(
-        entity_id or self._entity_id,
+        entity_id,
         **(self._sanitize_args(ref=scc.ARGS_FOR_TURN_OFF, **kwargs)))
 
   def _turn_off(self):
@@ -306,6 +308,7 @@ class LightActionBase(TimedActionBase):
         return
 
     for entity_id in state:
+      scc.log(self._app, self, 'Restoring state for: %s (%s)' % (entity_id, state[entity_id]))
       if state[entity_id].get(scc.KEY_STATE) == 'on':
         self._turn_on_with_args(
             entity_id=entity_id,

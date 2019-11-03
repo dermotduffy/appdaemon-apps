@@ -55,6 +55,7 @@ CONF_COLOR_NAME = 'color_name'
 CONF_SONOS_VOLUME = 'volume'
 CONF_ENTITIES = 'entities'
 CONF_ENTITY_ID = 'entity_id'
+CONF_UNDERLYING_ENTITIES = 'underlying_entities'
 CONF_UNDERLYING_ENTITY_IDS = 'underlying_entity_ids'
 CONF_EVENT_NAME = 'event_name'
 CONF_BREATH_LENGTH = 'breath_length'      # Length of a single breath.
@@ -228,21 +229,22 @@ CONFIG_CONDITION_SCHEMA = vol.Schema([{
   str: str,
 }])
 
-CONFIG_ENTITY_SCHEMA = vol.Schema([{
-  vol.Required(CONF_ENTITY_ID): str,
-  vol.Optional(CONF_UNDERLYING_ENTITY_IDS): [str],
-}])
+CONFIG_UNDERLYING_ENTITIES_SCHEMA = vol.Schema({
+  vol.Optional(CONF_LIGHT): vol.Schema({
+    str: [str],
+  }, extra=vol.PREVENT_EXTRA),
+}, extra=vol.PREVENT_EXTRA)
 
 CONFIG_SCHEMA_OUTPUT = vol.Schema({
   vol.Optional(CONF_SETTINGS): CONFIG_SCHEMA_SETTINGS_ATTR,
   vol.Optional(CONF_LIGHT): vol.Schema([
     CONFIG_SCHEMA_LIGHT_ATTR.extend({
-      vol.Required(CONF_ENTITIES): CONFIG_ENTITY_SCHEMA,
+      vol.Required(CONF_ENTITIES): [str],
     })
   ]),
   vol.Optional(CONF_SONOS): vol.Schema([
     CONFIG_SCHEMA_SONOS_ATTR.extend({
-      vol.Required(CONF_ENTITIES): CONFIG_ENTITY_SCHEMA,
+      vol.Required(CONF_ENTITIES): [str],
     })
   ]),
   vol.Optional(CONF_NOTIFY): vol.Schema([
@@ -256,7 +258,6 @@ CONFIG_SCHEMA_OUTPUT = vol.Schema({
 CONFIG_SCHEMA = vol.Schema({
   # The name of the HASS event to listen to.
   vol.Required(CONF_EVENT_NAME): str,
-
   vol.Optional(CONF_TAGS): vol.Schema({
     vol.Optional(str): vol.Schema(vol.Any(None, {
       vol.Optional(CONF_SETTINGS): CONFIG_SCHEMA_SETTINGS_ATTR,
@@ -264,6 +265,7 @@ CONFIG_SCHEMA = vol.Schema({
       vol.Optional(CONF_SONOS): CONFIG_SCHEMA_SONOS_ATTR,
     })),
   }, extra=vol.PREVENT_EXTRA),
+  vol.Optional(CONF_UNDERLYING_ENTITIES): CONFIG_UNDERLYING_ENTITIES_SCHEMA,
   vol.Optional(CONF_OUTPUTS): vol.Schema([
     CONFIG_SCHEMA_OUTPUT
   ]),
