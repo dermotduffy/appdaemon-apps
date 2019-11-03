@@ -147,6 +147,7 @@ class StatusController(threading.Thread):
       # time to remove that saved state. It will be recaptured when needed.
       for entity_id in [key for key in self._captured_light_state
                         if key not in self._entity_to_action]:
+        self._app.log('Deleting state for %s' % entity_id)
         del(self._captured_light_state[entity_id])
 
 
@@ -369,18 +370,20 @@ class StatusController(threading.Thread):
             if not action_cls:
               continue
 
-            prior_state = self._captured_light_state.get(entity_id, {})
+            for underlying_entity_id in underlying_entity_ids:
+              if underlying_entity_id not in self._captured_light_state:
+                self._captured_light_state[underlying_entity_id] = (
+                    actions.LightActionBase.capture_state(
+                        self._app, underlying_entity_id))
 
-            if not prior_state:
-              for underlying_entity_id in underlying_entity_ids:
-                entity_state = actions.LightActionBase.capture_state(
-                    self._app, underlying_entity_id)
-                prior_state[underlying_entity_id] = entity_state
-              self._captured_light_state[entity_id] = prior_state
+            state_to_register = {}
+            for underlying_entity_id in underlying_entity_ids:
+              state_to_register[underlying_entity_id] = \
+                  self._captured_light_state[underlying_entity_id]
 
             action = action_cls(
                 self._app, self._report_action_finished,
-                entity_id, prior_state, **arguments)
+                entity_id, state_to_register, **arguments)
 
             for underlying_entity_id in underlying_entity_ids:
               self._entity_to_action[underlying_entity_id] = action
