@@ -291,18 +291,13 @@ class LightActionBase(TimedActionBase):
       if self._is_finished:
         return
     if not force:
-      self._do_finish_action()
+      if self._finish_action == scc.CONF_ACTION_LIGHT_TURN_ON:
+        self._turn_on()
+      elif self._finish_action == scc.CONF_ACTION_LIGHT_TURN_OFF:
+        self._turn_off()
+      elif self._finish_action == scc.CONF_ACTION_LIGHT_RESTORE:
+        self._restore_state()
     super()._complete_action(force=force)
-
-  def _do_finish_action(self):
-    if self._finish_action == scc.CONF_ACTION_LIGHT_TURN_ON:
-      self._turn_on()
-    elif self._finish_action == scc.CONF_ACTION_LIGHT_TURN_OFF:
-      self._turn_off()
-    elif self._finish_action == scc.CONF_ACTION_LIGHT_RESTORE:
-      self._restore_state()
-    else:
-      super()._do_finish_action()
 
   def _restore_state(self):
     with self._lock:
