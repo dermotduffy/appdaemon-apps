@@ -93,7 +93,6 @@ CONF_TAG = 'tag'
 
 CONF_SONOS_TTS_SERVICE = 'tts_service'
 CONF_SONOS_MEDIA = 'media'
-CONF_SONOS_PLAY_FIRST = 'play_first'
 CONF_SONOS_CHIME = 'chime'
 CONF_SONOS_CHIME_LENGTH = 'chime_length'
 
@@ -125,7 +124,7 @@ SONOS_ACTIONS = [
 SONOS_GROUP_IGNORE_KEYS = [
     CONF_ENTITIES,
     CONF_SONOS_VOLUME,
-    CONF_SONOS_PLAY_FIRST,
+    CONF_PRIORITY,
 ]
 
 DEFAULT_LIGHT_ACTION = CONF_ACTION_LIGHT_TOGGLE
@@ -155,6 +154,7 @@ DEFAULTS_MAPPING = {
     CONF_ACTION: DEFAULT_LIGHT_ACTION,
     CONF_FINISH_ACTION: DEFAULT_LIGHT_FINISH_ACTION,
     CONF_LENGTH: DEFAULT_LIGHT_LENGTH,
+    CONF_PRIORITY: DEFAULT_PRIORITY,
   },
   CONF_SONOS: {
     CONF_ACTION: DEFAULT_SONOS_ACTION,
@@ -162,52 +162,48 @@ DEFAULTS_MAPPING = {
     CONF_SONOS_TTS_SERVICE: DEFAULT_SONOS_TTS_SERVICE,
     CONF_MESSAGE: DEFAULT_MESSAGE,
     CONF_SONOS_CHIME_LENGTH: DEFAULT_SONOS_CHIME_LENGTH,
-  },
-  CONF_SETTINGS: {
     CONF_PRIORITY: DEFAULT_PRIORITY,
-    CONF_FORCE: DEFAULT_FORCE,
   },
   CONF_NOTIFY: {
+    CONF_PRIORITY: DEFAULT_PRIORITY,
     CONF_MESSAGE: DEFAULT_MESSAGE,
+  },
+  CONF_SETTINGS: {
+    CONF_FORCE: DEFAULT_FORCE,
   },
 }
 
 CONFIG_SCHEMA_SETTINGS_ATTR = vol.Schema({
   vol.Optional(CONF_FORCE): bool,
-  vol.Optional(CONF_PRIORITY, default=DEFAULT_PRIORITY):
-      vol.Range(min=MIN_PRIORITY, max=MAX_PRIORITY),
 })
 
 CONFIG_SCHEMA_SHARED_ATTR = vol.Schema({
-  vol.Optional(CONF_LENGTH): vol.Range(min=0),
+  vol.Optional(CONF_PRIORITY, default=DEFAULT_PRIORITY):
+      vol.Range(min=MIN_PRIORITY, max=MAX_PRIORITY),
 })
 
 # Cannot use defaults, as otherwise parameter overriding will not function
 # correctly (as non-present attributes will appear present and override
 # actually present attributes).
 CONFIG_SCHEMA_LIGHT_ATTR = CONFIG_SCHEMA_SHARED_ATTR.extend({
+  vol.Optional(CONF_LENGTH): vol.Range(min=0),
   vol.Optional(CONF_ACTION): vol.In(LIGHT_ACTIONS),
   vol.Optional(CONF_FINISH_ACTION): vol.In(LIGHT_FINISH_ACTIONS),
-
-  # Add action seconds, a delay after action pre finish_action
-#  vol.Exclusive(CONF_BREATHE_COUNT, CONF_BREATHE_GROUP): int,
-#  vol.Exclusive(CONF_BREATHE_SECONDS, CONF_BREATHE_GROUP): int,
-
   vol.Optional(CONF_BREATH_LENGTH): vol.Range(min=2, max=10.0),
 }, extra=vol.ALLOW_EXTRA)
 
 CONFIG_SCHEMA_SONOS_ATTR = CONFIG_SCHEMA_SHARED_ATTR.extend({
+  vol.Optional(CONF_LENGTH): vol.Range(min=0),
   vol.Optional(CONF_SONOS_VOLUME): vol.Range(min=0.0, max=1.0),
   vol.Optional(CONF_MESSAGE): str,
   vol.Optional(CONF_SONOS_TTS_SERVICE): str,
   vol.Optional(CONF_SONOS_MEDIA): str,
   vol.Optional(CONF_ACTION): vol.In(SONOS_ACTIONS),
-  vol.Optional(CONF_SONOS_PLAY_FIRST): bool,
   vol.Optional(CONF_SONOS_CHIME): str,
   vol.Optional(CONF_SONOS_CHIME_LENGTH): vol.Range(min=0),
 }, extra=vol.PREVENT_EXTRA)
 
-CONFIG_SCHEMA_NOTIFY_ATTR = vol.Schema({
+CONFIG_SCHEMA_NOTIFY_ATTR = CONFIG_SCHEMA_SHARED_ATTR.extend({
   vol.Optional(CONF_MESSAGE): str,
   vol.Optional(CONF_TITLE): str,
 }, extra=vol.PREVENT_EXTRA)
@@ -247,7 +243,6 @@ CONFIG_SCHEMA_OUTPUT = vol.Schema({
       vol.Required(CONF_SERVICE): str,
     })
   ]),
-#  vol.Optional(CONF_TAGS): vol.Schema([str]),
   vol.Optional(CONF_CONDITION): CONFIG_CONDITION_SCHEMA,
 }, extra=vol.PREVENT_EXTRA)
 

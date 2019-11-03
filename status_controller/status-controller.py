@@ -67,9 +67,12 @@ class StatusController(threading.Thread):
       stack_trace = traceback.format_exc()
       self._app.error('%s%s%s' % (e, os.linesep, stack_trace), level="ERROR")
 
+  def _is_sonos_action(self, action):
+    return isinstance(action, actions.SonosAction)
+
   def _is_sonos_action_in_flight(self):
     for action in self._entity_to_action.values():
-      if isinstance(action, actions.SonosAction):
+      if self._is_sonos_action(action):
         return True
     return False
 
@@ -112,11 +115,11 @@ class StatusController(threading.Thread):
         # postponed events back (to avoid a high-priority event with a
         # contended entity from preventing uncontended events from being
         # processed.
-        priority, settings, event, outputs = event_tpl
+        priority, force, event, outputs = event_tpl
 
         entities_in_outputs = self._get_entities_involved_in_outputs(outputs)
         if entities_in_outputs.intersection(set(self._entity_to_action)):
-          if settings[scc.CONF_FORCE]:
+          if force:
             self._app.log('Found contended event. Force killing '
                           'actions using in-scope entities. Event: %s' % event)
             self._kill_actions_on_entities(entities_in_outputs)
@@ -145,7 +148,10 @@ class StatusController(threading.Thread):
 
 
   def add(self, event):
-    priorities = []
+    priorities = set()
+    force = False
+
+    # Take the highest output priority, and use that as the event priority.
     outputs = self._get_matching_outputs(event)
     for output in outputs:
       settings = scc.get_event_arguments(
@@ -153,10 +159,19 @@ class StatusController(threading.Thread):
           event,
           output.get(scc.CONF_SETTINGS, None),
           scc.CONF_SETTINGS)
-      priorities.append(settings[scc.CONF_PRIORITY])
+      if settings[scc.CONF_FORCE]:
+        force = True
+
+      for domain in (scc.CONF_SONOS, scc.CONF_LIGHT, scc.CONF_NOTIFY):
+        if not domain in output:
+          continue
+        for entry in output[domain]:
+          entry = scc.get_event_arguments(self._config, event, entry, domain)
+          priorities.add(entry[scc.CONF_PRIORITY])
+
     if priorities:
       with self._cv:
-        self._events.append((max(priorities), settings, event, outputs))
+        self._events.append((max(priorities), force, event, outputs))
         self._cv.notify()
 
   def _report_action_finished(self, action):
@@ -216,13 +231,43 @@ class StatusController(threading.Thread):
     return value
 
   def _process_single_event(self, event, outputs):
-    self._app.log('>> Processing single event: %s / %s' % (event, outputs))
-    self._app.log('>>> Processing Sonos event: %s' % event)
-    self._create_sonos_actions(event, outputs)
-    self._app.log('>>> Processing Light event: %s' % event)
-    self._create_light_actions(event, outputs)
-    self._app.log('>>> Processing Notify event: %s' % event)
-    self._create_notify_actions(event, outputs)
+    executable_actions = []
+    self._app.log('>> Creating actions: %s / %s' % (event, outputs))
+    self._app.log('>>> Creating Sonos actions: %s' % event)
+    executable_actions.extend(self._create_sonos_actions(event, outputs))
+    self._app.log('>>> Creating Light actions: %s' % event)
+    executable_actions.extend(self._create_light_actions(event, outputs))
+    self._app.log('>>> Creating Notify event: %s' % event)
+    executable_actions.extend(self._create_notify_actions(event, outputs))
+    self._app.log('>> Finished creating actions: %s' % event)
+    self._app.log('>> Total actions to execute: %i' % len(executable_actions))
+
+    execution_groups = {}
+    has_sonos_action = False
+
+    for action in executable_actions:
+      execution_groups.setdefault(action.get_priority(), []).append(action)
+
+      if self._is_sonos_action(action):
+        has_sonos_action = True
+    self._app.log('To execute, groups: %s' % execution_groups)
+
+    if has_sonos_action and not self._captured_global_sonos_state:
+      # Capture global state, rather than doing it per-entity. As we cannot
+      # read the group status, it's possible to end up with broken
+      # configuration if we snapshot with only some entities (e.g. two
+      # events, with different overlapping entity_ids will result in
+      # capturing an an inappropriate intermediate state).
+      actions.SonosAction.capture_global_sonos_state(self._app)
+      self._captured_global_sonos_state = True
+
+    for priority_key in sorted(execution_groups, reverse=True):
+      self._app.log('>>> Executing actions with priority: %i' % priority_key)
+      for action_obj in execution_groups[priority_key]:
+        action_obj.prepare()
+      for action_obj in execution_groups[priority_key]:
+        action_obj.action()
+
     self._app.log('>> Finished with single event: %s' % event)
 
   def _get_entities_involved_in_outputs(self, outputs) -> set:
@@ -235,101 +280,58 @@ class StatusController(threading.Thread):
               entities.add(entity_id)
     return entities
 
+  def _get_sonos_primary(self, group_entities):
+    return sorted(group_entities, reverse=True,
+                  # x is (entity, arguments)
+                  # x[1] are the arguments
+                  # x[1][scc.CONF_PRIORITY] is the priority
+                  # ...)[0] is the highest priority pair of (entity, arguments)
+                  # ...)[0][0] is the priority of the highest priority pair.
+                  key=lambda x: x[1][scc.CONF_PRIORITY])[0][0]
+
   def _create_sonos_actions(self, event, outputs):
     visited_entity_ids = []
-    sonos_groups_unique_args = {}
-    sonos_groups_entity_order = {}
+    sonos_groups = {}
 
     # Get all the sonos players with the same group key.
     for output in outputs:
       if scc.CONF_SONOS in output:
         for sonos in output.get(scc.CONF_SONOS):
           arguments = scc.get_event_arguments(self._config, event, sonos, scc.CONF_SONOS)
+          filtered_args = self._filter_sonos_args(arguments)
+          tmp = filtered_args.items()
+          group_key = frozenset(filtered_args.items())
+
           for entity_id in arguments.get(scc.CONF_ENTITIES):
             # Only invoke the 1st action that involves this entity in this event.
             if entity_id in visited_entity_ids:
               continue
             visited_entity_ids.append(entity_id)
 
-            common_args = self._get_sonos_common_args(arguments)
-            unique_args = self._get_sonos_unique_args(arguments)
-            group_key = frozenset(common_args.items())
-            sonos_groups_unique_args.setdefault(
-                group_key, {})[entity_id] = unique_args
-            sonos_groups_entity_order.setdefault(
-                group_key, []).append(entity_id)
+            sonos_groups.setdefault(group_key, []).append((entity_id, arguments))
 
-    # Create action objects.
-    actions_join_first = []
-    actions_play_first = []
+    sonos_actions = []
 
-    for group in sonos_groups_unique_args:
-      common_args = dict(group)
-      unique_args = sonos_groups_unique_args[group]
-      entity_order = sonos_groups_entity_order[group]
+    for group in sonos_groups:
+      primary = self._get_sonos_primary(sonos_groups[group])
 
-      action = common_args.get(scc.CONF_ACTION)
-      action_cls = actions.SONOS_ACTION_MAP[action]
-      if not action_cls:
-        continue
-      action_obj = action_cls(self._app, self._report_action_finished,
-                              entity_order, unique_args, **common_args)
+      for entity_id, arguments in sonos_groups[group]:
+        action = arguments.get(scc.CONF_ACTION)
+        action_cls = actions.SONOS_ACTION_MAP[action]
+        if not action_cls:
+          continue
+        action_obj = action_cls(self._app, self._report_action_finished,
+                                entity_id, primary, **arguments)
+        self._entity_to_action[entity_id] = action_obj
+        sonos_actions.append(action_obj)
 
-      # Determine if we want to play or join first.
-      for entity_id in entity_order:
-        if scc.CONF_SONOS_PLAY_FIRST in unique_args[entity_id]:
-          actions_play_first.append(action_obj)
-          break
-      else:
-        actions_join_first.append(action_obj)
+    return sonos_actions
 
-      for entity in entity_order:
-        self._entity_to_action[entity] = action_obj
-
-    if actions_play_first or actions_join_first:
-      if not self._captured_global_sonos_state:
-        # Capture global state, rather than doing it per-entity. As we cannot
-        # read the group status, it's possible to end up with broken
-        # configuration if we snapshot with only some entities (e.g. two
-        # events, with different overlapping entity_ids will result in
-        # capturing an ainappropriate intermediate state).
-        actions.SonosAction.capture_global_sonos_state(self._app)
-        self._captured_global_sonos_state = True
-
-      self._raw_execute_sonos_actions(actions_play_first, actions_join_first)
-
-  def _raw_execute_sonos_actions(self, actions_play_first, actions_join_first):
-    # There are two kinds of actions, those with play_first and those without.
-    # Those with play_first will start playing on the master device first, then
-    # join the others to it. This is useful in low-latency instances where some
-    # sound is desired immediately. join_first on the other hand will join all
-    # devices first, causing play back to be perfectly in sync, but at a cost
-    # of extra latency.
-
-    if actions_play_first:
-      for action in actions_play_first:
-        action.prepare(primary_only=True)
-      for action in actions_play_first:
-        action.action()
-      for action in actions_play_first:
-        action.prepare(secondaries_only=True)
-
-    if actions_join_first:
-      # Do all the preparation first (join/unjoin, etc) so that the actions are
-      # as close to sync'd as possible.
-      self._raw_execute_generic_actions(actions_join_first)
-
-  def _get_sonos_common_args(self, arguments):
+  def _filter_sonos_args(self, arguments):
     return {
         key: arguments[key]
         for key in arguments
         if key not in scc.SONOS_GROUP_IGNORE_KEYS}
-
-  def _get_sonos_unique_args(self, arguments):
-    return {
-        key: arguments[key]
-        for key in arguments
-        if key in scc.SONOS_GROUP_IGNORE_KEYS}
 
   def _create_light_actions(self, event, outputs):
     visited_entity_ids = []
@@ -363,14 +365,7 @@ class StatusController(threading.Thread):
             self._entity_to_action[entity_id] = action
             light_actions.append(action)
 
-    if light_actions:
-       self._raw_execute_generic_actions(light_actions)
-
-  def _raw_execute_generic_actions(self, generic_actions):
-    for action in generic_actions:
-      action.prepare()
-    for action in generic_actions:
-      action.action()
+    return light_actions
 
   def _create_notify_actions(self, event, outputs):
     notify_actions = []
@@ -381,5 +376,4 @@ class StatusController(threading.Thread):
               self._config, event, notify, scc.CONF_NOTIFY)
           notify_actions.append(actions.NotifyAction(
               self._app, self._report_action_finished, **arguments))
-    if notify_actions:
-      self._raw_execute_generic_actions(notify_actions)
+    return notify_actions

@@ -35,6 +35,11 @@ class ActionBase(object):
     self._kwargs = kwargs
     self._is_finished = False
 
+    self._priority = self._pop_argument(scc.CONF_PRIORITY)
+
+  def get_priority(self):
+    return self._priority
+
   def prepare(self):
     """Do whatever preparation is necessary. Get everything ready up to the
     point of visibility to the user."""
@@ -92,61 +97,36 @@ class TimedActionBase(ActionBase):
 
 
 class SonosAction(TimedActionBase):
-  def __init__(self, app, complete_callback,
-               entity_order, unique_args, **kwargs):
+  def __init__(self, app, complete_callback, entity_id, primary, **kwargs):
     super().__init__(app, complete_callback, **kwargs)
-    self._entity_order = entity_order
-    self._unique_args = unique_args
 
-    # Find the first entity_id with 'play_first: true'.
-    for entity_id in self._unique_args:
-      if self._unique_args[entity_id].get(scc.CONF_SONOS_PLAY_FIRST):
-        self._primary = entity_id
-        break
-    else:
-      self._primary = self._get_all()[0]
-    scc.log(self._app, self, 'Primary is: %s' % self._primary)
+    self._entity_id = entity_id
+    self._primary = primary
+
+    self._volume = self._pop_argument(scc.CONF_SONOS_VOLUME)
+
+    scc.log(self._app, self, 'Sonos entity: %s (Primary is: %s)' % (
+        self._entity_id, self._primary))
+
+  def _is_primary(self):
+    return self._entity_id == self._primary
 
   def _complete_action(self, force=False):
     if self._is_finished:
       return
-    if force:
+    if self._is_primary() and force:
       self._stop_media()
     super()._complete_action(force=force)
 
-  def prepare(self, primary_only=False, secondaries_only=False):
+  def prepare(self):
     super().prepare()
-    self._unjoin(
-        primary_only=primary_only,
-        secondaries_only=secondaries_only)
-    if not primary_only:
+    self._unjoin()
+
+    if not self._is_primary():
       # Primary does not need to join itself.
-      self._join_if_necessary()
-    self._set_volume(
-        primary_only=primary_only,
-        secondaries_only=secondaries_only)
+      self._join()
 
-  def _get_all(self):
-    return self._entity_order
-
-  def _get_primary(self):
-    return self._primary
-
-  def _get_secondaries(self):
-    return [entity_id for entity_id in self._entity_order
-            if entity_id != self._primary]
-
-  def _get_entities(self, primary_only=False, secondaries_only=False):
-    if primary_only:
-      return [self._get_primary()]
-    elif secondaries_only:
-      return self._get_secondaries()
-    else:
-      return self._get_all()
-
-  def _get_entities_str(self, primary_only=False, secondaries_only=False):
-    return ','.join(self._get_entities(
-        primary_only=primary_only, secondaries_only=secondaries_only))
+    self._set_volume()
 
   @classmethod
   def capture_global_sonos_state(cls, app):
@@ -159,57 +139,39 @@ class SonosAction(TimedActionBase):
     app.call_service(SONOS_SERVICE_RESTORE)
 
   def _stop_media(self):
-    scc.log(self._app, self, 'Stopping play on: %s' % self._get_primary())
+    scc.log(self._app, self, 'Stopping play on: %s' % self._entity_id)
     self._app.call_service(
         SONOS_SERVICE_MEDIA_STOP,
-        entity_id=self._get_primary())
+        entity_id=self._entity_id)
 
-  def _set_volume(self, primary_only=False, secondaries_only=False):
-    entities = self._get_entities(
-        primary_only=primary_only, secondaries_only=secondaries_only)
-    volumes = {}
-
-    # Batch up the devices with the same volume setting, to reduce the number
-    # of requests.
-    for entity_id in entities:
-      entity_vol = self._unique_args[entity_id].get(scc.CONF_SONOS_VOLUME)
-      if entity_vol is not None:
-        volumes.setdefault(float(entity_vol), []).append(entity_id)
-
-    for volume in volumes:
-      entity_ids = ','.join(volumes[volume])
+  def _set_volume(self):
+    if self._volume:
       scc.log(self._app, self, 'Setting volume to %f for: %s' % (
-          volume, entity_ids))
+          self._volume, self._entity_id))
       self._app.call_service(
           SONOS_SERVICE_VOLUME_SET,
-          entity_id=entity_ids,
-          volume_level=volume)
+          entity_id=self._entity_id,
+          volume_level=self._volume)
 
-  def _unjoin(self, primary_only=False, secondaries_only=False):
+  def _unjoin(self):
     # Need to unjoin even if there's only 1 entity (as it may already be joined
     # to something else, we do not know).
-    entity_ids = self._get_entities_str(
-        primary_only=primary_only, secondaries_only=secondaries_only)
-    scc.log(self._app, self, 'Unjoining: %s' % entity_ids)
+    scc.log(self._app, self, 'Unjoining: %s' % self._entity_id)
     self._app.call_service(
         SONOS_SERVICE_UNJOIN,
-        entity_id=entity_ids)
+        entity_id=self._entity_id)
 
-  def _join_if_necessary(self):
-    entity_ids = self._get_entities_str(secondaries_only=True)
-    if entity_ids:
-      scc.log(self._app, self, 'Joining \'%s\' to: %s' %
-          (entity_ids, self._get_primary()))
-      self._app.call_service(
-          SONOS_SERVICE_JOIN,
-          master=self._get_primary(),
-          entity_id=entity_ids)
+  def _join(self):
+    scc.log(self._app, self, 'Joining \'%s\' to: %s' %
+        (self._entity_id, self._primary))
+    self._app.call_service(
+        SONOS_SERVICE_JOIN,
+        master=self._primary,
+        entity_id=self._entity_id)
 
 class SonosTTSAction(SonosAction):
-  def __init__(self, app, complete_callback,
-               entity_order, unique_args, **kwargs):
-    super().__init__(app, complete_callback,
-                     entity_order, unique_args, **kwargs)
+  def __init__(self, app, complete_callback, entity_id, primary, **kwargs):
+    super().__init__(app, complete_callback, entity_id, primary, **kwargs)
 
     self._message = self._pop_argument(scc.CONF_MESSAGE)
     self._tts_service = self._pop_argument(scc.CONF_SONOS_TTS_SERVICE)
@@ -227,6 +189,10 @@ class SonosTTSAction(SonosAction):
 
   def action(self):
     super().action()
+    if not self._is_primary():
+      self._complete_action()
+      return
+
     if self._chime:
       self._action_chime()
       self._speak_timer_handle = self._app.run_in(
@@ -237,38 +203,38 @@ class SonosTTSAction(SonosAction):
 
   def _action_chime(self):
     scc.log(self._app, self, 'Chiming on %s: \'%s\'' % (
-        self._get_primary(), self._chime))
+        self._entity_id, self._chime))
     self._app.call_service(
         SONOS_SERVICE_MEDIA_PLAY,
-        entity_id=self._get_primary(),
+        entity_id=self._entity_id,
         media_content_id=self._chime,
         media_content_type='music')
 
   def _action_speak(self, kwargs=None):
     scc.log(self._app, self, 'Speaking on %s: \'%s\'' % (
-        self._get_primary(), self._message))
+        self._entity_id, self._message))
     self._app.call_service(
         self._tts_service,
-        entity_id=self._get_primary(),
+        entity_id=self._entity_id,
         message=self._message)
     self._schedule_action_complete()
 
 
 class SonosPlayMediaAction(SonosAction):
-  def __init__(self, app, complete_callback,
-               entity_order, unique_args, **kwargs):
-    super().__init__(app, complete_callback,
-                     entity_order, unique_args, **kwargs)
+  def __init__(self, app, complete_callback, entity_id, primary, **kwargs):
+    super().__init__(app, complete_callback, entity_id, primary, **kwargs)
     self._media = self._pop_argument(scc.CONF_SONOS_MEDIA)
 
   def action(self):
     super().action()
+    if not self._is_primary():
+      return
 
     scc.log(self._app, self, 'Playing media on %s: \'%s\'' % (
-        self._get_primary(), self._media))
+        self._entity_id, self._media))
     self._app.call_service(
         SONOS_SERVICE_MEDIA_PLAY,
-        entity_id=self._get_primary(),
+        entity_id=self._entity_id,
         media_content_id=self._media,
         media_content_type='music')
 
