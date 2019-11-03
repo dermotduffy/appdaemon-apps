@@ -268,19 +268,19 @@ class LightActionBase(TimedActionBase):
     else:
       self._turn_on()
 
-  def _turn_on_with_args(self, **kwargs):
-    scc.log(self._app, self, 'Turning on: %s (%s)' % (self._entity_id, kwargs))
+  def _turn_on_with_args(self, entity_id=None, **kwargs):
+    scc.log(self._app, self, 'Turning on: %s (%s)' % (entity_id, kwargs))
     self._app.turn_on(
-        self._entity_id,
+        entity_id or self._entity_id,
         **(self._sanitize_args(ref=scc.ARGS_FOR_TURN_ON, **kwargs)))
 
   def _turn_on(self):
     return self._turn_on_with_args(**self._kwargs)
 
-  def _turn_off_with_args(self, **kwargs):
-    scc.log(self._app, self, 'Turning off: %s (%s)' % (self._entity_id, kwargs))
+  def _turn_off_with_args(self, entity_id=None, **kwargs):
+    scc.log(self._app, self, 'Turning off: %s (%s)' % (entity_id, kwargs))
     self._app.turn_off(
-        self._entity_id,
+        entity_id or self._entity_id,
         **(self._sanitize_args(ref=scc.ARGS_FOR_TURN_OFF, **kwargs)))
 
   def _turn_off(self):
@@ -302,17 +302,20 @@ class LightActionBase(TimedActionBase):
   def _restore_state(self):
     with self._lock:
       state = self._prior_state
-      if state is None:
+      if not state:
         return
-      self._prior_state = None
 
-    if state.get(scc.KEY_STATE) == 'on':
-      self._turn_on_with_args(
-          **self._sanitize_args(
-              ref=scc.ATTR_ARGS_FOR_TURN_ON,
-              **state.get(scc.KEY_ATTRIBUTES)))
-    elif state.get(scc.KEY_STATE) == 'off':
-      self._turn_off_with_args(**state.get(scc.KEY_ATTRIBUTES))
+    for entity_id in state:
+      if state[entity_id].get(scc.KEY_STATE) == 'on':
+        self._turn_on_with_args(
+            entity_id=entity_id,
+            **self._sanitize_args(
+                ref=scc.ATTR_ARGS_FOR_TURN_ON,
+                **state[entity_id].get(scc.KEY_ATTRIBUTES)))
+      elif state[entity_id].get(scc.KEY_STATE) == 'off':
+        self._turn_off_with_args(
+            entity_id=entity_id,
+            **state[entity_id].get(scc.KEY_ATTRIBUTES))
 
   @classmethod
   def capture_state(cls, app, entity_id):

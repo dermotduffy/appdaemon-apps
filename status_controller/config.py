@@ -54,6 +54,8 @@ CONF_NOTIFY = 'notify'
 CONF_COLOR_NAME = 'color_name'
 CONF_SONOS_VOLUME = 'volume'
 CONF_ENTITIES = 'entities'
+CONF_ENTITY_ID = 'entity_id'
+CONF_UNDERLYING_ENTITY_IDS = 'underlying_entity_ids'
 CONF_EVENT_NAME = 'event_name'
 CONF_BREATH_LENGTH = 'breath_length'      # Length of a single breath.
 CONF_LENGTH = 'length'
@@ -226,16 +228,21 @@ CONFIG_CONDITION_SCHEMA = vol.Schema([{
   str: str,
 }])
 
+CONFIG_ENTITY_SCHEMA = vol.Schema([{
+  vol.Required(CONF_ENTITY_ID): str,
+  vol.Optional(CONF_UNDERLYING_ENTITY_IDS): [str],
+}])
+
 CONFIG_SCHEMA_OUTPUT = vol.Schema({
   vol.Optional(CONF_SETTINGS): CONFIG_SCHEMA_SETTINGS_ATTR,
   vol.Optional(CONF_LIGHT): vol.Schema([
     CONFIG_SCHEMA_LIGHT_ATTR.extend({
-      vol.Required(CONF_ENTITIES): [str],
+      vol.Required(CONF_ENTITIES): CONFIG_ENTITY_SCHEMA,
     })
   ]),
   vol.Optional(CONF_SONOS): vol.Schema([
     CONFIG_SCHEMA_SONOS_ATTR.extend({
-      vol.Required(CONF_ENTITIES): [str],
+      vol.Required(CONF_ENTITIES): CONFIG_ENTITY_SCHEMA,
     })
   ]),
   vol.Optional(CONF_NOTIFY): vol.Schema([

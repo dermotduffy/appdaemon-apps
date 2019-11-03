@@ -276,8 +276,8 @@ class StatusController(threading.Thread):
       for domain in [scc.CONF_SONOS, scc.CONF_LIGHT]:
         if domain in output:
           for entity_set in output[domain]:
-            for entity_id in entity_set.get(scc.CONF_ENTITIES):
-              entities.add(entity_id)
+            for entity in entity_set.get(scc.CONF_ENTITIES):
+              entities.add(entity[scc.CONF_ENTITY_ID])
     return entities
 
   def _get_sonos_primary(self, group_entities):
@@ -302,7 +302,9 @@ class StatusController(threading.Thread):
           tmp = filtered_args.items()
           group_key = frozenset(filtered_args.items())
 
-          for entity_id in arguments.get(scc.CONF_ENTITIES):
+          for entity in arguments.get(scc.CONF_ENTITIES):
+            entity_id = entity[scc.CONF_ENTITY_ID]
+
             # Only invoke the 1st action that involves this entity in this event.
             if entity_id in visited_entity_ids:
               continue
@@ -342,7 +344,9 @@ class StatusController(threading.Thread):
         for light in output.get(scc.CONF_LIGHT):
           arguments = scc.get_event_arguments(
               self._config, event, light, scc.CONF_LIGHT)
-          for entity_id in arguments.pop(scc.CONF_ENTITIES):
+          for entity in arguments.pop(scc.CONF_ENTITIES):
+            entity_id = entity[scc.CONF_ENTITY_ID]
+
             # Only invoke the 1st action that involves this entity in this event.
             if entity_id in visited_entity_ids:
               continue
@@ -352,10 +356,18 @@ class StatusController(threading.Thread):
             if not action_cls:
               continue
 
-            prior_state = self._captured_light_state.get(entity_id, None)
+            prior_state = self._captured_light_state.get(entity_id, {})
+
             if not prior_state:
-              prior_state =  actions.LightActionBase.capture_state(
-                  self._app, entity_id)
+              if scc.CONF_UNDERLYING_ENTITY_IDS in entity:
+                underlying_entity_ids = entity[scc.CONF_UNDERLYING_ENTITY_IDS]
+              else:
+                underlying_entity_ids = [entity_id]
+
+              for underlying_entity_id in underlying_entity_ids:
+                entity_state = actions.LightActionBase.capture_state(
+                    self._app, underlying_entity_id)
+                prior_state[underlying_entity_id] = entity_state
               self._captured_light_state[entity_id] = prior_state
 
             action = action_cls(
