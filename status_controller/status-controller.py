@@ -60,15 +60,18 @@ class StatusController(threading.Thread):
     self._captured_global_sonos_state = False
     self._captured_light_state = {}
 
-  def run(self):
+  def _thread_wrap_for_appdaemon(self, func, *args, **kwargs):
     try:
-      while True:
-        self._run_controller_cycle()
+      func(*args, **kwargs)
     except Exception as e:
       # Funnel exceptions through the Appdaemon logger (otherwise we won't see
       # them at all)
       stack_trace = traceback.format_exc()
       self._app.error('%s%s%s' % (e, os.linesep, stack_trace), level="ERROR")
+
+  def run(self):
+    while True:
+      self._thread_wrap_for_appdaemon(self._run_controller_cycle)
 
   def _is_sonos_action(self, action):
     return isinstance(action, actions.SonosAction)
@@ -266,20 +269,29 @@ class StatusController(threading.Thread):
 
     for priority_key in sorted(execution_groups, reverse=True):
       self._app.log('>>> Executing actions with priority: %i' % priority_key)
-      self._parallel_execute_actions(execution_groups[priority_key])
+      self._create_worker_thread(
+          self._parallel_execute_actions,
+          (execution_groups[priority_key],))
 
     self._app.log('>> Finished with single event: %s' % event)
+
+  def _create_worker_thread(self, func, args):
+    worker = threading.Thread(
+        target=lambda *args, **kwargs: self._thread_wrap_for_appdaemon(
+            func, *args, **kwargs),
+        args=args)
+    worker.daemon = True
+    worker.start()
+    return worker
 
   def _parallel_execute_actions(self, actions_to_execute):
     # Start threads to execute the actions at this priority band in parallel.
     for call in ('prepare', 'action'):
       workers = []
       for action in actions_to_execute:
-        worker = threading.Thread(
-            target=lambda action: getattr(action, call)(),
-            args=[action])
-        worker.start()
-        workers.append(worker)
+        workers.append(self._create_worker_thread(
+            lambda action: getattr(action, call)(),
+            (action,)))
 
       for worker in workers:
         worker.join()
