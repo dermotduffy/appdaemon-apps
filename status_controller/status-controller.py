@@ -266,12 +266,23 @@ class StatusController(threading.Thread):
 
     for priority_key in sorted(execution_groups, reverse=True):
       self._app.log('>>> Executing actions with priority: %i' % priority_key)
-      for action_obj in execution_groups[priority_key]:
-        action_obj.prepare()
-      for action_obj in execution_groups[priority_key]:
-        action_obj.action()
+      self._parallel_execute_actions(execution_groups[priority_key])
 
     self._app.log('>> Finished with single event: %s' % event)
+
+  def _parallel_execute_actions(self, actions_to_execute):
+    # Start threads to execute the actions at this priority band in parallel.
+    for call in ('prepare', 'action'):
+      workers = []
+      for action in actions_to_execute:
+        worker = threading.Thread(
+            target=lambda action: getattr(action, call)(),
+            args=[action])
+        worker.start()
+        workers.append(worker)
+
+      for worker in workers:
+        worker.join()
 
   def _get_entities_involved_in_outputs(self, outputs) -> set:
     entities = set()
