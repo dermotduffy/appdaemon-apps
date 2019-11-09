@@ -70,8 +70,7 @@ class StatusController(threading.Thread):
       self._app.error('%s%s%s' % (e, os.linesep, stack_trace), level="ERROR")
 
   def run(self):
-    while True:
-      self._thread_wrap_for_appdaemon(self._run_controller_cycle)
+    self._thread_wrap_for_appdaemon(self._run_controller_cycle)
 
   def _is_sonos_action(self, action):
     return isinstance(action, actions.SonosAction)
@@ -105,53 +104,56 @@ class StatusController(threading.Thread):
 
   def _run_controller_cycle(self):
     with self._cv:
-      self._app.log('Starting controller cycle, waiting...')
-      self._cv.wait()
-      self._app.log('...controller woken')
+      while True:
+        self._app.log('Starting controller cycle, waiting...')
+        self._cv.wait()
+        self._app.log('...controller woken')
 
-      # Clean up finished actions.
-      self._remove_finished_actions()
+        # Clean up finished actions.
+        self._remove_finished_actions()
 
-      # Process new actions.
-      for event_tpl in sorted(
-          self._events,
-          reverse=True,
-          key = lambda x: x[0]):
-        # Process the whole available event list, and only then add the
-        # postponed events back (to avoid a high-priority event with a
-        # contended entity from preventing uncontended events from being
-        # processed.
-        priority, force, event, outputs = event_tpl
+        # Process new actions.
+        for event_tpl in sorted(
+            self._events,
+            reverse=True,
+            key = lambda x: x[0]):
+          # Process the whole available event list, and only then add the
+          # postponed events back (to avoid a high-priority event with a
+          # contended entity from preventing uncontended events from being
+          # processed.
+          priority, force, event, outputs = event_tpl
 
-        entities_in_outputs = self._get_entities_involved_in_outputs(outputs)
-        if entities_in_outputs.intersection(set(self._entity_to_action)):
-          if force:
-            self._app.log('Found contended event. Force killing '
-                          'actions using in-scope entities. Event: %s' % event)
-            self._kill_actions_on_entities(entities_in_outputs)
-          else:
-            self._app.log('Found contended event. Postponing. Event: %s'
-                % event)
-            continue
+          entities_in_outputs = self._get_entities_involved_in_outputs(outputs)
+          if entities_in_outputs.intersection(set(self._entity_to_action)):
+            if force:
+              self._app.log(
+                  'Found contended event. Force killing '
+                  'actions using in-scope entities. Event: %s' %event)
+              self._kill_actions_on_entities(entities_in_outputs)
+            else:
+              self._app.log('Found contended event. Postponing. Event: %s'
+                  % event)
+              continue
 
-        self._events.remove(event_tpl)
-        self._process_single_event(event, outputs)
+          self._events.remove(event_tpl)
+          self._process_single_event(event, outputs)
 
-      # If there's a captured Sonos state, and there's no Sonos action in
-      # flight (after new events have been added above), then it's time to
-      # restore the state.
-      if (self._captured_global_sonos_state and
-          not self._is_sonos_action_in_flight()):
-        actions.SonosAction.restore_global_sonos_state(self._app)
-        self._captured_global_sonos_state = False
+        # If there's a captured Sonos state, and there's no Sonos action in
+        # flight (after new events have been added above), then it's time to
+        # restore the state.
+        if (self._captured_global_sonos_state and
+            not self._is_sonos_action_in_flight()):
+          actions.SonosAction.restore_global_sonos_state(self._app)
+          self._captured_global_sonos_state = False
 
-      # If there's a captured light state, and there's no light action for
-      # that entity in flight (after new events have been added above), then it's
-      # time to remove that saved state. It will be recaptured when needed.
-      for entity_id in [key for key in self._captured_light_state
-                        if key not in self._entity_to_action]:
-        self._app.log('Deleting state for %s' % entity_id)
-        del(self._captured_light_state[entity_id])
+        # If there's a captured light state, and there's no light action for
+        # that entity in flight (after new events have been added above), then
+        # it's time to remove that saved state. It will be recaptured when
+        # needed.
+        for entity_id in [key for key in self._captured_light_state
+                          if key not in self._entity_to_action]:
+          self._app.log('Deleting state for %s' % entity_id)
+          del(self._captured_light_state[entity_id])
 
 
   def add(self, event):
