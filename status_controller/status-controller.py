@@ -87,7 +87,7 @@ class StatusController(threading.Thread):
       if entity in self._entity_to_action:
         actions_to_kill.add(self._entity_to_action[entity])
     for action in actions_to_kill:
-      action.kill_action()
+      action.complete_action(hard_kill_entities=entities)
     self._remove_actions(actions_to_kill)
 
   def _remove_actions(self, actions_to_remove):
@@ -124,7 +124,10 @@ class StatusController(threading.Thread):
           priority, force, event, outputs = event_tpl
 
           entities_in_outputs = self._get_entities_involved_in_outputs(outputs)
-          if entities_in_outputs.intersection(set(self._entity_to_action)):
+          overlapping_entities = entities_in_outputs.intersection(
+              set(self._entity_to_action))
+
+          if overlapping_entities:
             if force:
               self._app.log(
                   'Found contended event. Force killing '

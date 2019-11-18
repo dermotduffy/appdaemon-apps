@@ -51,10 +51,7 @@ class ActionBase(object):
     """Do the action that will visible to the user."""
     pass
 
-  def kill_action(self):
-    self._complete_action(force=True)
-
-  def _complete_action(self, force=False):
+  def complete_action(self, hard_kill_entities=None):
     """Complete any post-action steps."""
     with self._lock:
       if self._is_finished:
@@ -78,7 +75,7 @@ class TimedActionBase(ActionBase):
     self._action = self._pop_argument(scc.CONF_ACTION)
     self._length = self._pop_argument(scc.CONF_LENGTH)
 
-  def _complete_action(self, force=False):
+  def complete_action(self, hard_kill_entities=None):
     """Complete any post-action steps."""
     with self._lock:
       if self._is_finished:
@@ -86,14 +83,14 @@ class TimedActionBase(ActionBase):
       if self._complete_timer_handle is not None:
         self._cancel_timer(self._complete_timer_handle)
         self._complete_timer_handle = None
-    super()._complete_action(force=force)
+    super().complete_action(hard_kill_entities=hard_kill_entities)
 
   def _schedule_action_complete(self):
     with self._lock:
       if self._is_finished:
         return
       self._complete_timer_handle = self._app.run_in(
-          self._complete_action,
+          self.complete_action,
           self._length)
 
   def _cancel_timer(self, timer_handle):
@@ -114,13 +111,16 @@ class SonosAction(TimedActionBase):
   def _is_primary(self):
     return self._entity_id == self._primary
 
-  def _complete_action(self, force=False):
+  def complete_action(self, hard_kill_entities=None):
     with self._lock:
       if self._is_finished:
         return
-    if self._is_primary() and force:
+    if self._is_primary() and hard_kill_entities:
+      # This does not currently implement per-entity stopping, which would
+      # require breaking apart and re-assembling the groups. Instead, if any
+      # entity needs to hard stop, the media is stopped on all entities.
       self._stop_media()
-    super()._complete_action(force=force)
+    super().complete_action(hard_kill_entities=hard_kill_entities)
 
   def prepare(self):
     super().prepare()
@@ -196,19 +196,19 @@ class SonosTTSAction(SonosAction):
     self._chime_length = self._pop_argument(scc.CONF_SONOS_CHIME_LENGTH)
     self._speak_timer_handle = None
 
-  def _complete_action(self, force=False):
+  def complete_action(self, hard_kill_entities=None):
     with self._lock:
       if self._is_finished:
         return
       if self._speak_timer_handle:
         self._cancel_timer(self._speak_timer_handle)
         self._speak_timer_handle = None
-    super()._complete_action(force=force)
+    super().complete_action(hard_kill_entities=hard_kill_entities)
 
   def action(self):
     super().action()
     if not self._is_primary():
-      self._complete_action()
+      self.complete_action()
       return
 
     if self._chime:
@@ -279,6 +279,9 @@ class LightActionBase(TimedActionBase):
     super().__init__(app, complete_callback, **kwargs)
     self._finish_action = self._pop_argument(scc.CONF_FINISH_ACTION)
     self._entity_id = entity_id
+
+    # The prior_state dict is also used as a general mechanism for passing
+    # in the underlying entities, which may be different from the _entity_id.
     self._prior_state = prior_state
 
   def _sanitize_args(self, ref, **kwargs):
@@ -322,26 +325,44 @@ class LightActionBase(TimedActionBase):
   def _turn_off(self):
     return self._turn_off_with_args(**self._kwargs)
 
-  def _complete_action(self, force=False):
+  def complete_action(self, hard_kill_entities=None):
     with self._lock:
       if self._is_finished:
         return
-    if not force:
+
+    if not hard_kill_entities:
       if self._finish_action == scc.CONF_ACTION_LIGHT_TURN_ON:
         self._turn_on()
       elif self._finish_action == scc.CONF_ACTION_LIGHT_TURN_OFF:
         self._turn_off()
       elif self._finish_action == scc.CONF_ACTION_LIGHT_RESTORE:
         self._restore_state()
-    super()._complete_action(force=force)
+    else:
+      with self._lock:
+        for entity_id in self._prior_state:
+          if entity_id in hard_kill_entities:
+            continue
+          if self._finish_action == scc.CONF_ACTION_LIGHT_TURN_ON:
+            self._turn_on_with_args(entity_id=entity_id, **self._kwargs)
+          elif self._finish_action == scc.CONF_ACTION_LIGHT_TURN_OFF:
+            self._turn_off_with_args(entity_id=entity_id, **self._kwargs)
+          elif self._finish_action == scc.CONF_ACTION_LIGHT_RESTORE:
+            self._restore_state(entity_id=entity_id)
+    super().complete_action(hard_kill_entities=hard_kill_entities)
 
-  def _restore_state(self):
+  def _restore_state(self, entity_id=None):
     with self._lock:
       state = self._prior_state
       if not state:
         return
 
-    for entity_id in state:
+    if entity_id is not None:
+      entities = [entity_id]
+      scc.log(self._app, self, 'Reduced restore for %s' % entity_id)
+    else:
+      entities = state.keys()
+
+    for entity_id in entities:
       scc.log(self._app, self, 'Restoring state for: %s (%s)' % (entity_id, state[entity_id]))
       if state[entity_id].get(scc.KEY_STATE) == 'on':
         self._turn_on_with_args(
@@ -406,12 +427,12 @@ class BreathingLightAction(LightActionBase):
         self._app.datetime(),
         self._beat_length, **{})
 
-  def _complete_action(self, force=False):
+  def complete_action(self, hard_kill_entities=None):
     with self._lock:
       if self._is_finished:
         return
       self._cancel_breathe_timer()
-    super()._complete_action(force=force)
+    super().complete_action(hard_kill_entities=hard_kill_entities)
 
   def _cancel_breathe_timer(self):
     with self._lock:
@@ -425,7 +446,7 @@ class BreathingLightAction(LightActionBase):
         return
     if self._beats_remaining <= 0:
       self._cancel_breathe_timer()
-      self._complete_action()
+      self.complete_action()
     else:
       self._toggle()
       self._beats_remaining -= 1
