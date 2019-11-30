@@ -64,10 +64,10 @@ ENTITY_SCHEMA = vol.Schema({
 }, extra=vol.PREVENT_EXTRA)
 ACTIVATE_ENTITIES = ENTITY_SCHEMA.extend({
   vol.Optional(CONF_SERVICE, default='turn_on'): vol.In(ALLOWED_SERVICES),
-}, extra=vol.PREVENT_EXTRA)
-GEACTIVATE_ENTITIES = ENTITY_SCHEMA.extend({
+}, extra=vol.ALLOW_EXTRA)
+DEACTIVATE_ENTITIES = ENTITY_SCHEMA.extend({
   vol.Optional(CONF_SERVICE, default='turn_off'): vol.In(ALLOWED_SERVICES),
-}, extra=vol.PREVENT_EXTRA)
+}, extra=vol.ALLOW_EXTRA)
 
 OUTPUT_SCHEMA = vol.Schema([{
   vol.Optional(CONF_CONDITION, default=[]): CONFIG_CONDITION_SCHEMA,
