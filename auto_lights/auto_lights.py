@@ -221,7 +221,7 @@ class AutoLights(hass.Hass):
 
   def _update_status(self, kwargs=None):
     if self._status_var:
-      state = STATUS_VAR_WAITING
+      state = STATUS_VAR_STATE_WAITING
       attributes = {
           STATUS_VAR_ATTR_TIME_REMAINING: STATUS_VAR_ATTR_NA,
           STATUS_VAR_ATTR_LAST_TRIGGER % KEY_ON: STATUS_VAR_ATTR_NONE,
