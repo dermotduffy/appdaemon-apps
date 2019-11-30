@@ -23,6 +23,7 @@ CONF_SERVICE = 'service'
 CONF_ON_STATE = 'on_state'
 CONF_STATUS_VAR = 'status_var'
 CONF_MIN_TURN_ON_GAP = 'min_turn_on_gap'
+CONF_SERVICE_DATA = 'service_data'
 
 DEFAULT_AUTO_TIMEOUT = 60*15
 DEFAULT_HARD_TIMEOUT = 60*60*3
@@ -58,15 +59,20 @@ STATUS_VAR_ICONS = {
 CONFIG_CONDITION_SCHEMA = vol.Schema([conditions.CONFIG_CONDITION_BASE_SCHEMA], extra=vol.PREVENT_EXTRA)
 ALLOWED_SERVICES = ['turn_on', 'turn_off']
 
+SERVICE_DATA = vol.Schema({
+}, extra=vol.ALLOW_EXTRA)
+
 ENTITY_SCHEMA = vol.Schema({
   vol.Required(CONF_ENTITY_ID): str,
   vol.Optional(CONF_ON_STATE, default=DEFAULT_ON_STATE): str,
 }, extra=vol.PREVENT_EXTRA)
 ACTIVATE_ENTITIES = ENTITY_SCHEMA.extend({
   vol.Optional(CONF_SERVICE, default='turn_on'): vol.In(ALLOWED_SERVICES),
+  vol.Optional(CONF_SERVICE_DATA): SERVICE_DATA,
 }, extra=vol.ALLOW_EXTRA)
 DEACTIVATE_ENTITIES = ENTITY_SCHEMA.extend({
   vol.Optional(CONF_SERVICE, default='turn_off'): vol.In(ALLOWED_SERVICES),
+  vol.Optional(CONF_SERVICE_DATA): SERVICE_DATA,
 }, extra=vol.ALLOW_EXTRA)
 
 OUTPUT_SCHEMA = vol.Schema([{
@@ -293,8 +299,10 @@ class AutoLights(hass.Hass):
     self._last_turn_on_datetime = self.datetime()
 
     self.log('Turning on output: %s' % output)
+
     for entity in output[CONF_ACTIVATE_ENTITIES]:
-      self.turn_on(entity[CONF_ENTITY_ID])
+      data = entity.get(CONF_SERVICE_DATA, {})
+      self.turn_on(entity[CONF_ENTITY_ID], **data)
 
   def _turn_off(self, output):
     self.log('Turning off output: %s' % output)
@@ -304,13 +312,16 @@ class AutoLights(hass.Hass):
       entities = output[CONF_ACTIVATE_ENTITIES]
 
     for entity in entities:
-      self.turn_off(entity[CONF_ENTITY_ID])
+      data = entity.get(CONF_SERVICE_DATA, {})
+      self.turn_off(entity[CONF_ENTITY_ID], **data)
 
   def _has_on_state_entity(self):
     for entity in self._state_entities:
       if self.get_state(entity[CONF_ENTITY_ID]) == entity[CONF_ON_STATE]:
         return True
     return False
+
+  # TODO: Honor service call
 
   def _state_callback(self, entity, attribute, old, new, kwargs):
     self.log('State callback: %s (old: %s, new: %s)' % (entity, old, new))
