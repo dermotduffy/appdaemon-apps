@@ -32,17 +32,23 @@ KEY_ON = 'on'
 KEY_OFF = 'off'
 
 STATUS_VAR_UPDATE_SECONDS = 10
-STATUS_VAR_UNKNOWN = 'unknown'
-STATUS_VAR_MANUAL = 'manual'
-STATUS_VAR_ACTIVE_TIMER = 'auto_timer'
-STATUS_VAR_WAITING = 'waiting'
-STATUS_VAR_ATTR_TIME_REMAINING = 'light_timeout'
+STATUS_VAR_STATE_MANUAL = 'manual'
+STATUS_VAR_STATE_ACTIVE_TIMER = 'auto_timer'
+STATUS_VAR_STATE_WAITING = 'waiting'
 STATUS_VAR_ATTR_NONE = 'N/A'
+STATUS_VAR_ATTR_TIME_REMAINING = 'light_timeout'
 STATUS_VAR_ATTR_LAST_TRIGGER = 'last_trigger_%s'
 STATUS_VAR_ATTR_EXTEND = 'will_extend'
 STATUS_VAR_ATTR_EXTEND_NEVER = 'never'
 STATUS_VAR_ATTR_EXTEND_NO = 'no'
 STATUS_VAR_ATTR_EXTEND_YES = 'yes'
+STATUS_VAR_ATTR_ICON = 'icon'
+
+STATUS_VAR_ICONS = {
+    STATUS_VAR_STATE_MANUAL: 'mdi:hand-left',
+    STATUS_VAR_STATE_ACTIVE_TIMER: 'mdi:timer',
+    STATUS_VAR_STATE_WAITING: 'mdi:sleep'
+}
 
 CONFIG_CONDITION_SCHEMA = vol.Schema([conditions.CONFIG_CONDITION_BASE_SCHEMA], extra=vol.PREVENT_EXTRA)
 ALLOWED_SERVICES = ['turn_on', 'turn_off']
@@ -215,9 +221,10 @@ class AutoLights(hass.Hass):
       }
 
       if self._manual_mode:
-        state = STATUS_VAR_MANUAL
+        state = STATUS_VAR_STATE_MANUAL
       elif self._auto_timer:
-        state = STATUS_VAR_ACTIVE_TIMER
+        state = STATUS_VAR_STATE_ACTIVE_TIMER
+      attributes[STATUS_VAR_ATTR_ICON] = STATUS_VAR_ICONS[state]
 
       timers = sorted((self._auto_timer, self._hard_timer))
       if timers[0]:
