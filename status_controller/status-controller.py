@@ -45,7 +45,6 @@ class StatusControllerApp(hass.Hass):
 
 def evaluator_TAG(app, current_time, key, condition, triggers,
                   evaluators, default_evaluator, operator, kind, **kwargs):
-  app.log('hihi %s' % kwargs['event'])
   return condition in kwargs['event'][scc.CONF_TAGS]
 
 
