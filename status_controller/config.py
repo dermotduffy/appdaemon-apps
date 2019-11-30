@@ -3,6 +3,8 @@ import datetime
 
 import voluptuous as vol
 
+import conditions
+
 KEY_STATE = 'state'
 KEY_ATTRIBUTES = 'attributes'
 KEY_ALL_ATTRIBUTES = 'all'
@@ -84,13 +86,6 @@ CONF_FORCE = 'force'
 CONF_MESSAGE = 'message'
 CONF_TITLE = 'title'
 CONF_SERVICE = 'service'
-
-CONF_OR = 'or'
-CONF_AND = 'and'
-CONF_NOT = 'not'
-CONF_AFTER = 'after'
-CONF_BEFORE = 'before'
-CONF_BETWEEN = 'between'
 CONF_CONDITION = 'condition'
 CONF_TAG = 'tag'
 
@@ -218,16 +213,13 @@ def ConstrainTimeRange(fmt='%H:%M:%S'):
   return lambda v: tuple(
       datetime.datetime.strptime(t, fmt).time() for t in v.split('-'))
 
-CONFIG_CONDITION_SCHEMA = vol.Schema([{
-  vol.Optional(CONF_OR): vol.Self,
-  vol.Optional(CONF_AND): vol.Self,
-  vol.Optional(CONF_NOT): vol.Self,
-  vol.Optional(CONF_AFTER): ConstrainTime(),
-  vol.Optional(CONF_BEFORE): ConstrainTime(),
-  vol.Optional(CONF_BETWEEN): ConstrainTimeRange(),
+CONFIG_CONDITION_BASE_SCHEMA = copy.copy(conditions.CONFIG_CONDITION_BASE_SCHEMA)
+CONFIG_CONDITION_BASE_SCHEMA.update({
   vol.Optional(CONF_TAG): str,
-  str: str,
-}])
+})
+CONFIG_CONDITION_SCHEMA = vol.Schema([
+  CONFIG_CONDITION_BASE_SCHEMA
+])
 
 CONFIG_UNDERLYING_ENTITIES_SCHEMA = vol.Schema({
   vol.Optional(CONF_LIGHT): vol.Schema({

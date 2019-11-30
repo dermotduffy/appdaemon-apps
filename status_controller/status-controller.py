@@ -13,6 +13,7 @@ import voluptuous as vol
 
 import config as scc
 import actions
+import conditions
 
 # A note on restoring the state pre-event:
 #
@@ -41,6 +42,13 @@ class StatusControllerApp(hass.Hass):
     event = scc.EVENT_SCHEMA(data)
     self._status_controller.add(event)
 
+
+def evaluator_TAG(app, current_time, key, condition, triggers,
+                  evaluators, default_evaluator, operator, kind, **kwargs):
+  app.log('hihi %s' % kwargs['event'])
+  return condition in kwargs['event'][scc.CONF_TAGS]
+
+
 class StatusController(threading.Thread):
   def __init__(self, app, config, *args, **kwargs):
     super().__init__(*args, **kwargs)
@@ -59,6 +67,11 @@ class StatusController(threading.Thread):
     # Capture state information.
     self._captured_global_sonos_state = False
     self._captured_light_state = {}
+
+    self._output_evaluators = copy.copy(conditions.BASE_EVALUATORS)
+    self._output_evaluators.update({
+      scc.CONF_TAG: evaluator_TAG,
+    })
 
   def _thread_wrap_for_appdaemon(self, func, *args, **kwargs):
     try:
@@ -194,53 +207,13 @@ class StatusController(threading.Thread):
     event_tags = event.get(scc.CONF_TAGS)
     matches = []
     current_time = self._app.datetime().time()
-
     for output in self._config.get(scc.CONF_OUTPUTS):
-      if (scc.CONF_CONDITION in output and
-          not self._evaluate_condition(event, output[scc.CONF_CONDITION])):
+      if scc.CONF_CONDITION in output and not conditions.evaluate_condition(
+            self._app, self._app.datetime().time(), output[scc.CONF_CONDITION],
+            evaluators=self._output_evaluators, event=event):
         continue
       matches.append(output)
     return matches
-
-  def _evaluate_condition(self, event, condition_set, operator=scc.CONF_AND):
-    value = None
-    current_time = self._app.datetime().time()
-
-    for condition in condition_set:
-      for key in condition:
-        if key in [scc.CONF_AND, scc.CONF_OR]:
-          intermediate_value = self._evaluate_condition(
-              event, condition[key], operator=key)
-        elif key == scc.CONF_NOT:
-          intermediate_value = not self._evaluate_condition(
-              event, condition[key], operator=scc.CONF_AND)
-        elif key == scc.CONF_AFTER:
-          intermediate_value = condition[key] <= current_time
-        elif key == scc.CONF_BEFORE:
-          intermediate_value = current_time < condition[key]
-        elif key == scc.CONF_BETWEEN:
-          start, end = condition[key]
-          if start < end:
-            intermediate_value = start <= current_time < end
-          else:
-            intermediate_value = start <= current_time or current_time < end
-        elif key == scc.CONF_TAG:
-          intermediate_value = (condition[key] in event[scc.CONF_TAGS])
-        else:
-          intermediate_value = (self._app.get_state(key) == condition[key])
-
-        if value is None:
-          value = intermediate_value
-        elif operator == scc.CONF_AND:
-          value &= intermediate_value
-        elif operator == scc.CONF_OR:
-          value |= intermediate_value
-        else:
-          raise RuntimeError('Invalid operator: %s' % operator)
-
-    if value is None:
-      value = True
-    return value
 
   def _process_single_event(self, event, outputs):
     executable_actions = []

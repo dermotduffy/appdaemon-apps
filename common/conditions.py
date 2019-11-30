@@ -33,27 +33,27 @@ CONFIG_CONDITION_BASE_SCHEMA = {
 }
 
 def evaluator_AND_OR(app, current_time, key, condition, triggers,
-                     evaluators, default_evaluator, operator, kind):
+                     evaluators, default_evaluator, operator, kind, **kwargs):
   return evaluate_condition(
       app, current_time, condition, triggers,
-      evaluators, default_evaluator, key)
+      evaluators, default_evaluator, key, kind, **kwargs)
 
 def evaluator_NOT(app, current_time, key, condition, triggers,
-                  evaluators, default_evaluator, operator, kind):
+                  evaluators, default_evaluator, operator, kind, **kwargs):
   return not evaluate_condition(
       app, current_time, condition, triggers,
-      evaluators, default_evaluator, operator)
+      evaluators, default_evaluator, operator, kind, **kwargs)
 
 def evaluator_BEFORE(app, current_time, key, condition, triggers,
-                     evaluators, default_evaluator, operator, kind):
+                     evaluators, default_evaluator, operator, kind, **kwargs):
   return current_time < condition
 
 def evaluator_AFTER(app, current_time, key, condition, triggers,
-                    evaluators, default_evaluator, operator, kind):
+                    evaluators, default_evaluator, operator, kind, **kwargs):
   return current_time >= condition
 
 def evaluator_BETWEEN(app, current_time, key, condition, triggers,
-                      evaluators, default_evaluator, operator, kind):
+                      evaluators, default_evaluator, operator, kind, **kwargs):
   start, end = condition
   if start < end:
     return start <= current_time < end
@@ -61,7 +61,7 @@ def evaluator_BETWEEN(app, current_time, key, condition, triggers,
     return start <= current_time or current_time < end
 
 def evaluator_DEFAULT(app, current_time, key, condition, triggers,
-                      evaluators, default_evaluator, operator, kind):
+                      evaluators, default_evaluator, operator, kind, **kwargs):
   for numeric_operator in ('<=', '<', '>=', '>'):
     if condition.startswith(numeric_operator):
       rval = float(condition[len(numeric_operator):])
@@ -98,7 +98,8 @@ def evaluate_condition(app, current_time, condition_set,
                        triggers=None,
                        evaluators=BASE_EVALUATORS,
                        default_evaluator=evaluator_DEFAULT, operator=CONF_AND,
-                       kind=CONF_KIND_STATE):
+                       kind=CONF_KIND_STATE,
+                       **kwargs):
   value = None
   for condition in condition_set:
     kind = condition[CONF_KIND]
@@ -106,11 +107,11 @@ def evaluate_condition(app, current_time, condition_set,
       if key in evaluators:
         intermediate_value = evaluators[key](
             app, current_time, key, condition[key], triggers,
-            evaluators, default_evaluator, operator, kind)
+            evaluators, default_evaluator, operator, kind, **kwargs)
       else:
         intermediate_value = default_evaluator(
             app, current_time, key, condition[key], triggers,
-            evaluators, default_evaluator, operator, kind)
+            evaluators, default_evaluator, operator, kind, **kwargs)
 
       app.log('----- Evaluator: (%s:%s:%s) -> %s' % (
           kind, key, condition[key], intermediate_value))
