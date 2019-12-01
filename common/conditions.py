@@ -1,6 +1,8 @@
 import datetime
 import voluptuous as vol
 
+KEY_DEBUG = 'debug'
+
 CONF_OR = 'or'
 CONF_AND = 'and'
 CONF_NOT = 'not'
@@ -113,8 +115,9 @@ def evaluate_condition(app, current_time, condition_set,
             app, current_time, key, condition[key], triggers,
             evaluators, default_evaluator, operator, kind, **kwargs)
 
-      app.log('----- Evaluator: (%s:%s:%s) -> %s' % (
-          kind, key, condition[key], intermediate_value))
+      if KEY_DEBUG in kwargs and kwargs[DEBUG] == True:
+        app.log('----- Evaluator: (%s:%s:%s) -> %s' % (
+            kind, key, condition[key], intermediate_value))
 
       if value is None:
         value = intermediate_value
