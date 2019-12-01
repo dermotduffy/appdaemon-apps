@@ -487,7 +487,7 @@ class AutoLights(hass.Hass):
         self._last_trigger[activate_key] = self.get_state(
             entity, attribute=KEY_FRIENDLY_NAME)
 
-      self._update_status()
+        self._update_status()
 
   def _block_timer_expire(self, kwargs):
     self._update_status()
