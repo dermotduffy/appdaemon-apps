@@ -11,6 +11,7 @@ import conditions
 CONF_TRIGGER_ACTIVATE_CONDITION = 'trigger_activate_condition'
 CONF_TRIGGER_DEACTIVATE_CONDITION = 'trigger_deactivate_condition'
 CONF_EXTEND_CONDITION = 'extend_condition'
+CONF_DISABLE_CONDITION = 'disable_condition'
 CONF_CONDITION = 'condition'
 CONF_ACTIVATE_ENTITIES = 'activate_entities'
 CONF_DEACTIVATE_ENTITIES = 'deactivate_entities'
@@ -42,14 +43,16 @@ STATUS_VAR_STATE_MANUAL = 'manual'
 STATUS_VAR_STATE_ACTIVE_TIMER = 'auto_timer'
 STATUS_VAR_STATE_WAITING = 'waiting'
 STATUS_VAR_STATE_BLOCKED = 'blocked'
+STATUS_VAR_STATE_DISABLED = 'disabled'
 STATUS_VAR_ATTR_NA = 'N/A'
 STATUS_VAR_ATTR_NONE = 'None'
 STATUS_VAR_ATTR_TIME_REMAINING = 'light_timeout'
 STATUS_VAR_ATTR_LAST_TRIGGER = 'last_trigger_%s'
 STATUS_VAR_ATTR_EXTEND = 'will_extend'
 STATUS_VAR_ATTR_EXTEND_NEVER = 'never'
-STATUS_VAR_ATTR_EXTEND_NO = 'no'
-STATUS_VAR_ATTR_EXTEND_YES = 'yes'
+STATUS_VAR_ATTR_NO = 'no'
+STATUS_VAR_ATTR_YES = 'yes'
+STATUS_VAR_ATTR_DISABLED = 'disabled'
 STATUS_VAR_ATTR_ICON = 'icon'
 
 STATUS_VAR_ICONS = {
@@ -57,6 +60,7 @@ STATUS_VAR_ICONS = {
     STATUS_VAR_STATE_ACTIVE_TIMER: 'mdi:timer',
     STATUS_VAR_STATE_WAITING: 'mdi:sleep',
     STATUS_VAR_STATE_BLOCKED: 'mdi:block-helper',
+    STATUS_VAR_STATE_DISABLED: 'mdi:close-circle-outline',
 }
 
 CONFIG_CONDITION_SCHEMA = vol.Schema(
@@ -100,6 +104,7 @@ CONFIG_SCHEMA = vol.Schema({
   vol.Optional(CONF_TRIGGER_DEACTIVATE_CONDITION,
                default=[]): CONFIG_CONDITION_SCHEMA,
   vol.Optional(CONF_EXTEND_CONDITION, default=[]): CONFIG_CONDITION_SCHEMA,
+  vol.Optional(CONF_DISABLE_CONDITION, default=[]): CONFIG_CONDITION_SCHEMA,
   vol.Optional(CONF_STATE_ENTITIES): [ENTITY_SCHEMA],
   vol.Optional(CONF_AUTO_TIMEOUT,
                default=DEFAULT_AUTO_TIMEOUT): vol.Range(min=60),
@@ -185,6 +190,8 @@ class Timer(object):
   def __repr__(self):
     return '<Timer:%s,%s>' % (self._name, self.get_time_until_expire_string())
 
+# A note on state: As much as possible, attempt to store the authoritative
+# state in HA (retrieved via Appdaemon get_state(), not here.
 
 class AutoLights(hass.Hass):
   def initialize(self):
@@ -203,29 +210,22 @@ class AutoLights(hass.Hass):
     self._hard_timer = Timer(self, self._hard_timer_expire,
         self._config.get(CONF_HARD_TIMEOUT), name='hard')
     self._block_timer = Timer(self, self._block_timer_expire, name='block')
-
     self._state_update_timer = Timer(self,
         seconds=DEFAULT_STATE_UPDATE_TIMEOUT, name='state_update')
 
-    trigger_activate_entities = conditions.extract_entities_from_condition(
-        self._config.get(CONF_TRIGGER_ACTIVATE_CONDITION))
-    self.log('Trigger activate entities -> %s' % trigger_activate_entities)
-
-    for entity_id in trigger_activate_entities:
-      self.listen_state(self._trigger_callback, entity_id, activate=True)
-
-    trigger_deactivate_entities = conditions.extract_entities_from_condition(
-        self._config.get(CONF_TRIGGER_DEACTIVATE_CONDITION))
-    self.log('Trigger deactivate entities -> %s' % trigger_deactivate_entities)
-
-    for entity_id in trigger_deactivate_entities:
-      self.listen_state(self._trigger_callback, entity_id, activate=False)
+    self._listen_condition('activate', CONF_TRIGGER_ACTIVATE_CONDITION,
+        self._trigger_callback, activate=True)
+    self._listen_condition('deactivate', CONF_TRIGGER_DEACTIVATE_CONDITION,
+        self._trigger_callback, activate=False)
+    self._listen_condition('extend', CONF_EXTEND_CONDITION,
+        self._extend_callback)
+    self._listen_condition('disable', CONF_DISABLE_CONDITION,
+        self._disable_callback)
 
     self._state_entities = self._get_state_entities()
-    self.log('State entities -> %s' % self._state_entities)
-
-    for entity in self._state_entities:
-      self.listen_state(self._state_callback, entity[CONF_ENTITY_ID])
+    self._listen_entities('state',
+        [entity[CONF_ENTITY_ID] for entity in self._state_entities],
+        self._state_callback)
 
     if self._has_on_state_entity():
       self._hard_timer.create()
@@ -235,6 +235,18 @@ class AutoLights(hass.Hass):
           self._update_status,
           self.datetime(),
           STATUS_VAR_UPDATE_SECONDS)
+
+  def _listen_condition(self, name, conf_condition, func, **kwargs):
+    entities = conditions.extract_entities_from_condition(
+        self._config.get(conf_condition))
+    return self._listen_entities(name, entities, func, **kwargs)
+
+  def _listen_entities(self, name, entities, func, **kwargs):
+    self.log('Listening to %s entities -> %s' % (name, entities))
+
+    for entity_id in entities:
+      self.listen_state(func, entity_id, **kwargs)
+    return entities
 
   def _get_state_entities(self):
     if CONF_STATE_ENTITIES in self._config:
@@ -262,9 +274,11 @@ class AutoLights(hass.Hass):
           STATUS_VAR_ATTR_LAST_TRIGGER % KEY_ACTIVATE: STATUS_VAR_ATTR_NONE,
           STATUS_VAR_ATTR_LAST_TRIGGER % KEY_DEACTIVATE: STATUS_VAR_ATTR_NONE,
           STATUS_VAR_ATTR_EXTEND: STATUS_VAR_ATTR_EXTEND_NEVER,
+          STATUS_VAR_ATTR_DISABLED: STATUS_VAR_ATTR_NO,
       }
-
-      if self._block_timer:
+      if self._is_disabled():
+        state = STATUS_VAR_STATE_DISABLED
+      elif self._block_timer:
         state = STATUS_VAR_STATE_BLOCKED
       elif self._manual_mode:
         state = STATUS_VAR_STATE_MANUAL
@@ -284,9 +298,12 @@ class AutoLights(hass.Hass):
 
       if self._config.get(CONF_EXTEND_CONDITION):
         if self._should_extend():
-          attributes[STATUS_VAR_ATTR_EXTEND] = STATUS_VAR_ATTR_EXTEND_YES
+          attributes[STATUS_VAR_ATTR_EXTEND] = STATUS_VAR_ATTR_YES
         else:
-          attributes[STATUS_VAR_ATTR_EXTEND] = STATUS_VAR_ATTR_EXTEND_NO
+          attributes[STATUS_VAR_ATTR_EXTEND] = STATUS_VAR_ATTR_NO
+
+      if self._config.get(CONF_DISABLE_CONDITION) and self._is_disabled():
+          attributes[STATUS_VAR_ATTR_DISABLED] = STATUS_VAR_ATTR_YES
 
       self.set_state(self._status_var, state=state, attributes=attributes)
 
@@ -295,6 +312,12 @@ class AutoLights(hass.Hass):
         conditions.evaluate_condition(
             self, self.datetime().time(),
             self._config.get(CONF_EXTEND_CONDITION)))
+
+  def _is_disabled(self):
+    return (self._config.get(CONF_DISABLE_CONDITION) and
+        conditions.evaluate_condition(
+            self, self.datetime().time(),
+            self._config.get(CONF_DISABLE_CONDITION)))
 
   def _auto_timer_expire(self, kwargs):
     self.log('Auto timer expired at %s' % self.datetime())
@@ -369,13 +392,16 @@ class AutoLights(hass.Hass):
   def _state_callback(self, entity, attribute, old, new, kwargs):
     self.log('State callback: %s (old: %s, new: %s)' % (entity, old, new))
 
+    if self._is_disabled():
+      self.log('Disabled: Ignoring state for: %s' % entity)
+      return
+
     # A note on manual mode: Manual mode is not enabled when any
     # state change happens during automated lighting. The assumption is that
     # automated lighting will be the norm for a room, and so automations that
     # impact that lighting do not constitute conversion to manual mode (e.g.
     # status controller events).  Automations that work outside of automated
     # lighting times will indeed convert this to manual mode.
-
     if self._has_on_state_entity():
       # A changing state entity resets the timers.
       self._hard_timer.create()
@@ -407,11 +433,14 @@ class AutoLights(hass.Hass):
     self.log('Trigger callback (activate=%s): %s (old: %s, new: %s)' % (
         activate, entity, old, new))
 
-    if self._block_timer:
-      self.log('Skipping trigger due to being blocked: %s' % entity)
+    if self._is_disabled():
+      self.log('Disabled: Skipping trigger for: %s' % entity)
+      return
+    elif self._block_timer:
+      self.log('Blocked: Skipping trigger for: %s' % entity)
       return
     elif self._manual_mode:
-      self.log('Skipping trigger due to manual mode: %s' % entity)
+      self.log('Manual mode: Skipping trigger for: %s' % entity)
       return
 
     condition = self._config.get(
@@ -461,4 +490,18 @@ class AutoLights(hass.Hass):
       self._update_status()
 
   def _block_timer_expire(self, kwargs):
+    self._update_status()
+
+  def _extend_callback(self, entity, attribute, old, new, kwargs):
+    self._update_status()
+
+  def _disable_callback(self, entity, attribute, old, new, kwargs):
+    if self._is_disabled():
+      self._auto_timer.cancel()
+      self._hard_timer.cancel()
+    else:
+      if self._has_on_state_entity() and not self._hard_timer:
+        self._hard_timer.create()
+      self._manual_mode = False
+
     self._update_status()
