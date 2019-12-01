@@ -8,8 +8,8 @@ import voluptuous as vol
 
 import conditions
 
-CONF_TRIGGER_ON_CONDITION = 'trigger_on_condition'
-CONF_TRIGGER_OFF_CONDITION = 'trigger_off_condition'
+CONF_TRIGGER_ACTIVATE_CONDITION = 'trigger_activate_condition'
+CONF_TRIGGER_DEACTIVATE_CONDITION = 'trigger_deactivate_condition'
 CONF_EXTEND_CONDITION = 'extend_condition'
 CONF_CONDITION = 'condition'
 CONF_ACTIVATE_ENTITIES = 'activate_entities'
@@ -22,17 +22,17 @@ CONF_ENTITY_ID = 'entity_id'
 CONF_SERVICE = 'service'
 CONF_ON_STATE = 'on_state'
 CONF_STATUS_VAR = 'status_var'
-CONF_MIN_TURN_ON_GAP = 'min_turn_on_gap'
+CONF_MIN_ACTION_GAP = 'min_action_gap'
 CONF_SERVICE_DATA = 'service_data'
 
 DEFAULT_AUTO_TIMEOUT = 60*15
 DEFAULT_HARD_TIMEOUT = 60*60*3
 DEFAULT_ON_STATE = 'on'
-DEFAULT_MIN_TURN_ON_GAP = 60
+DEFAULT_MIN_ACTION_GAP = 60
 
 KEY_FRIENDLY_NAME = 'friendly_name'
-KEY_ON = 'on'
-KEY_OFF = 'off'
+KEY_ACTIVATE = 'activate'
+KEY_DEACTIVATE = 'deactivate'
 
 STATUS_VAR_UPDATE_SECONDS = 10
 STATUS_VAR_STATE_MANUAL = 'manual'
@@ -56,8 +56,13 @@ STATUS_VAR_ICONS = {
     STATUS_VAR_STATE_BLOCKED: 'mdi:block-helper',
 }
 
-CONFIG_CONDITION_SCHEMA = vol.Schema([conditions.CONFIG_CONDITION_BASE_SCHEMA], extra=vol.PREVENT_EXTRA)
-ALLOWED_SERVICES = ['turn_on', 'turn_off']
+CONFIG_CONDITION_SCHEMA = vol.Schema(
+    [conditions.CONFIG_CONDITION_BASE_SCHEMA],
+    extra=vol.PREVENT_EXTRA)
+
+SERVICE_TURN_ON = 'turn_on'
+SERVICE_TURN_OFF = 'turn_off'
+VALID_SERVICES = (SERVICE_TURN_ON, SERVICE_TURN_OFF)
 
 SERVICE_DATA = vol.Schema({
 }, extra=vol.ALLOW_EXTRA)
@@ -67,11 +72,15 @@ ENTITY_SCHEMA = vol.Schema({
   vol.Optional(CONF_ON_STATE, default=DEFAULT_ON_STATE): str,
 }, extra=vol.PREVENT_EXTRA)
 ACTIVATE_ENTITIES = ENTITY_SCHEMA.extend({
-  vol.Optional(CONF_SERVICE, default='turn_on'): vol.In(ALLOWED_SERVICES),
+  # Service is optional, as if unspecified we want service to be
+  # inferred from the context (i.e. if an activate_entity is used
+  # because no deactivate_entity is specified, then the default
+  # service should be 'turn_off', rather than 'turn_on'.
+  vol.Optional(CONF_SERVICE): vol.In(VALID_SERVICES),
   vol.Optional(CONF_SERVICE_DATA): SERVICE_DATA,
 }, extra=vol.ALLOW_EXTRA)
 DEACTIVATE_ENTITIES = ENTITY_SCHEMA.extend({
-  vol.Optional(CONF_SERVICE, default='turn_off'): vol.In(ALLOWED_SERVICES),
+  vol.Optional(CONF_SERVICE): vol.In(VALID_SERVICES),
   vol.Optional(CONF_SERVICE_DATA): SERVICE_DATA,
 }, extra=vol.ALLOW_EXTRA)
 
@@ -83,13 +92,18 @@ OUTPUT_SCHEMA = vol.Schema([{
 
 CONFIG_SCHEMA = vol.Schema({
   vol.Optional(CONF_STATUS_VAR): str,
-  vol.Optional(CONF_TRIGGER_ON_CONDITION, default=[]): CONFIG_CONDITION_SCHEMA,
-  vol.Optional(CONF_TRIGGER_OFF_CONDITION, default=[]): CONFIG_CONDITION_SCHEMA,
+  vol.Optional(CONF_TRIGGER_ACTIVATE_CONDITION,
+               default=[]): CONFIG_CONDITION_SCHEMA,
+  vol.Optional(CONF_TRIGGER_DEACTIVATE_CONDITION,
+               default=[]): CONFIG_CONDITION_SCHEMA,
   vol.Optional(CONF_EXTEND_CONDITION, default=[]): CONFIG_CONDITION_SCHEMA,
   vol.Optional(CONF_STATE_ENTITIES): [ENTITY_SCHEMA],
-  vol.Optional(CONF_AUTO_TIMEOUT, default=DEFAULT_AUTO_TIMEOUT): vol.Range(min=60),
-  vol.Optional(CONF_HARD_TIMEOUT, default=DEFAULT_HARD_TIMEOUT): vol.Range(min=300),
-  vol.Optional(CONF_MIN_TURN_ON_GAP, default=DEFAULT_MIN_TURN_ON_GAP): vol.Range(min=60),
+  vol.Optional(CONF_AUTO_TIMEOUT,
+               default=DEFAULT_AUTO_TIMEOUT): vol.Range(min=60),
+  vol.Optional(CONF_HARD_TIMEOUT,
+               default=DEFAULT_HARD_TIMEOUT): vol.Range(min=300),
+  vol.Optional(CONF_MIN_ACTION_GAP,
+               default=DEFAULT_MIN_ACTION_GAP): vol.Range(min=60),
   vol.Required(CONF_OUTPUT): OUTPUT_SCHEMA,
 }, extra=vol.ALLOW_EXTRA)
 
@@ -100,7 +114,7 @@ def timedelta_to_str(td):
 
 @functools.total_ordering
 class Timer(object):
-  def __init__(self, app, func, seconds, name='timer', kwargs=None):
+  def __init__(self, app, func, seconds=None, name='timer', kwargs=None):
     self._app = app
     self._func = func
     self._seconds = seconds
@@ -110,16 +124,21 @@ class Timer(object):
     self._handle = None
     self._expire_datetime = None
 
-  def create(self):
+  def create(self, seconds=None):
+    if seconds is None:
+      seconds = self._seconds
+    if seconds is None:
+      raise RuntimeError('Failed to specify timer \'seconds\'')
+
     if self._handle is not None:
       self.cancel()
     self._expire_datetime = self._app.datetime() + datetime.timedelta(
-        seconds=self._seconds)
+        seconds=seconds)
     self._handle = self._app.run_in(
         lambda kwargs: self._log_wrap(self._func, self._kwargs),
-        self._seconds)
+        seconds)
     self._app.log('Created timer: (%s, %s) for %i seconds' % (
-        self._name, self._handle, self._seconds))
+        self._name, self._handle, seconds))
 
   def cancel(self):
     if self._handle:
@@ -138,14 +157,15 @@ class Timer(object):
 
   def _log_wrap(self, func, kwargs):
     try:
-      result = func(kwargs)
+      # Reset internals first so callbacks can see that timer has finished.
       self._raw_reset()
+      result = func(kwargs)
       return result
     except Exception as e:
       # Funnel exceptions through the Appdaemon logger (otherwise we won't see
       # them at all)
       stack_trace = traceback.format_exc()
-      self.log('%s%s%s' % (e, os.linesep, stack_trace), level="ERROR")
+      self._app.log('%s%s%s' % (e, os.linesep, stack_trace), level="ERROR")
 
   def __eq__(self, other):
     return self._expire_datetime == other._expire_datetime
@@ -163,11 +183,13 @@ class Timer(object):
 class AutoLights(hass.Hass):
   def initialize(self):
     self._manual_mode = False
-    self._report_blocked = False
-    self._last_turn_on_datetime = None
+    self._last_actions = {
+        KEY_ACTIVATE: None,
+        KEY_DEACTIVATE: None,
+    }
     self._last_trigger = {
-        KEY_ON: None,
-        KEY_OFF: None
+        KEY_ACTIVATE: None,
+        KEY_DEACTIVATE: None
     }
 
     self._config = CONFIG_SCHEMA(self.args)
@@ -177,20 +199,21 @@ class AutoLights(hass.Hass):
         self._config.get(CONF_AUTO_TIMEOUT), name='auto')
     self._hard_timer = Timer(self, self._hard_timer_expire,
         self._config.get(CONF_HARD_TIMEOUT), name='hard')
+    self._block_timer = Timer(self, self._block_timer_expire, name='block')
 
-    trigger_on_entities = conditions.extract_entities_from_condition(
-        self._config.get(CONF_TRIGGER_ON_CONDITION))
-    self.log('Trigger on entities -> %s' % trigger_on_entities)
+    trigger_activate_entities = conditions.extract_entities_from_condition(
+        self._config.get(CONF_TRIGGER_ACTIVATE_CONDITION))
+    self.log('Trigger activate entities -> %s' % trigger_activate_entities)
 
-    for entity_id in trigger_on_entities:
-      self.listen_state(self._trigger_callback, entity_id, on=True)
+    for entity_id in trigger_activate_entities:
+      self.listen_state(self._trigger_callback, entity_id, activate=True)
 
-    trigger_off_entities = conditions.extract_entities_from_condition(
-        self._config.get(CONF_TRIGGER_OFF_CONDITION))
-    self.log('Trigger off entities -> %s' % trigger_off_entities)
+    trigger_deactivate_entities = conditions.extract_entities_from_condition(
+        self._config.get(CONF_TRIGGER_DEACTIVATE_CONDITION))
+    self.log('Trigger deactivate entities -> %s' % trigger_deactivate_entities)
 
-    for entity_id in trigger_off_entities:
-      self.listen_state(self._trigger_callback, entity_id, on=False)
+    for entity_id in trigger_deactivate_entities:
+      self.listen_state(self._trigger_callback, entity_id, activate=False)
 
     self._state_entities = self._get_state_entities()
     self.log('State entities -> %s' % self._state_entities)
@@ -230,15 +253,15 @@ class AutoLights(hass.Hass):
       state = STATUS_VAR_STATE_WAITING
       attributes = {
           STATUS_VAR_ATTR_TIME_REMAINING: STATUS_VAR_ATTR_NA,
-          STATUS_VAR_ATTR_LAST_TRIGGER % KEY_ON: STATUS_VAR_ATTR_NONE,
-          STATUS_VAR_ATTR_LAST_TRIGGER % KEY_OFF: STATUS_VAR_ATTR_NONE,
+          STATUS_VAR_ATTR_LAST_TRIGGER % KEY_ACTIVATE: STATUS_VAR_ATTR_NONE,
+          STATUS_VAR_ATTR_LAST_TRIGGER % KEY_DEACTIVATE: STATUS_VAR_ATTR_NONE,
           STATUS_VAR_ATTR_EXTEND: STATUS_VAR_ATTR_EXTEND_NEVER,
       }
 
-      if self._report_blocked and self._should_block():
-        state = STATUS_VAR_STATE_BLOCKED
-      elif self._manual_mode:
+      if self._manual_mode:
         state = STATUS_VAR_STATE_MANUAL
+      elif self._block_timer:
+        state = STATUS_VAR_STATE_BLOCKED
       elif self._auto_timer:
         state = STATUS_VAR_STATE_ACTIVE_TIMER
       attributes[STATUS_VAR_ATTR_ICON] = STATUS_VAR_ICONS[state]
@@ -248,7 +271,7 @@ class AutoLights(hass.Hass):
         attributes[STATUS_VAR_ATTR_TIME_REMAINING] = (
             timers[0].get_time_until_expire_string())
 
-      for key in (KEY_ON, KEY_OFF):
+      for key in (KEY_ACTIVATE, KEY_DEACTIVATE):
         if self._last_trigger[key]:
           attributes[STATUS_VAR_ATTR_LAST_TRIGGER % key] = (
               self._last_trigger[key])
@@ -277,51 +300,46 @@ class AutoLights(hass.Hass):
 
     output = self._get_best_matching_output()
     if output:
-      self._turn_off(output)
+      self._deactivate(output)
 
   def _hard_timer_expire(self, kwargs):
     self.log('Hard timer expired at %s' % self.datetime())
 
     output = self._get_best_matching_output()
     if output:
-      self._turn_off(output)
+      self._deactivate(output)
 
-  def _should_block(self):
-    if self._last_turn_on_datetime is not None:
-      time_since_last_turn_on = self.datetime() - self._last_turn_on_datetime
-      if (time_since_last_turn_on.total_seconds() <
-          self._config.get(CONF_MIN_TURN_ON_GAP)):
-        return True
-    return False
+  def _deactivate(self, output):
+    return self._activate(output, activate=False)
 
-  def _turn_on(self, output):
-    self._report_blocked = False
-    self._last_turn_on_datetime = self.datetime()
+  def _activate(self, output, activate=True):
+    self.log('%s output: %s' % (
+        'Activating' if activate else 'Deactivating', output))
 
-    self.log('Turning on output: %s' % output)
-
-    for entity in output[CONF_ACTIVATE_ENTITIES]:
-      data = entity.get(CONF_SERVICE_DATA, {})
-      self.turn_on(entity[CONF_ENTITY_ID], **data)
-
-  def _turn_off(self, output):
-    self.log('Turning off output: %s' % output)
-    if output.get(CONF_DEACTIVATE_ENTITIES):
-      entities = output[CONF_DEACTIVATE_ENTITIES]
+    entities = output[CONF_ACTIVATE_ENTITIES]
+    if activate:
+      default_service = SERVICE_TURN_ON
     else:
-      entities = output[CONF_ACTIVATE_ENTITIES]
+      default_service = SERVICE_TURN_OFF
+      if output[CONF_DEACTIVATE_ENTITIES]:
+        entities = output[CONF_DEACTIVATE_ENTITIES]
 
     for entity in entities:
       data = entity.get(CONF_SERVICE_DATA, {})
-      self.turn_off(entity[CONF_ENTITY_ID], **data)
+      service = entity.get(CONF_SERVICE, default_service)
+      if service == SERVICE_TURN_ON:
+        self.turn_on(entity[CONF_ENTITY_ID], **data)
+      else:
+        self.turn_off(entity[CONF_ENTITY_ID], **data)
+
+    self._last_actions[
+        KEY_ACTIVATE if activate else KEY_DEACTIVATE] = self.datetime()
 
   def _has_on_state_entity(self):
     for entity in self._state_entities:
       if self.get_state(entity[CONF_ENTITY_ID]) == entity[CONF_ON_STATE]:
         return True
     return False
-
-  # TODO: Honor service call
 
   def _state_callback(self, entity, attribute, old, new, kwargs):
     self.log('State callback: %s (old: %s, new: %s)' % (entity, old, new))
@@ -332,62 +350,64 @@ class AutoLights(hass.Hass):
       if not self._auto_timer:
         # Effectively moves into manual mode.
         self._manual_mode = True
-        self._last_trigger = { KEY_ON: None, KEY_OFF: None }
-      else:
-        self._auto_timer.create()
     else:
       self._auto_timer.cancel()
       self._hard_timer.cancel()
       self._manual_mode = False
 
-      # Don't reset the last OFF trigger as it may have turned the lights off.
-      self._last_trigger[KEY_ON] = None
-
     self._update_status()
 
   def _trigger_callback(self, entity, attribute, old, new, kwargs):
-    on = kwargs[KEY_ON]
-    if on:
-      on_or_off = KEY_ON
-    else:
-      on_or_off = KEY_OFF
-
-    self.log('Trigger %s callback: %s (old: %s, new: %s)' % (
-        on_or_off, entity, old, new))
+    activate = kwargs[KEY_ACTIVATE]
+    self.log('Trigger callback (activate=%s): %s (old: %s, new: %s)' % (
+        activate, entity, old, new))
 
     if self._manual_mode:
-      self.log('Skipping trigger on (%s) due to manual mode...' % entity)
+      self.log('Skipping trigger due to manual mode: %s' % entity)
       return
 
-    if on:
-      condition = self._config.get(CONF_TRIGGER_ON_CONDITION)
-    else:
-      condition = self._config.get(CONF_TRIGGER_OFF_CONDITION)
-
+    condition = self._config.get(
+        CONF_TRIGGER_ACTIVATE_CONDITION if activate
+        else CONF_TRIGGER_DEACTIVATE_CONDITION)
     triggered = conditions.evaluate_condition(self, self.datetime().time(),
         condition, triggers={entity: new})
+
+    activate_key = KEY_ACTIVATE if activate else KEY_DEACTIVATE
 
     if triggered:
       output = self._get_best_matching_output()
       if output:
-        if on:
-          # If lights are currently off, and if we previously turned them
-          # on more recently than CONF_MIN_TURN_ON_GAP then refuse to turn
-          # them on again.
-          if not self._has_on_state_entity() and self._should_block():
-            self.log('Blocking attempts to turn on output as %i seconds '
-                     '(%s) has not passed since the last attempt: %s' % (
-                self._config.get(CONF_MIN_TURN_ON_GAP),
-                CONF_MIN_TURN_ON_GAP, output))
-            self._report_blocked = True
+        last_action_time = self._last_actions[activate_key]
+
+        if last_action_time:
+          # Block actions if the last time this same action
+          # (activate/deactivate) was attempted was fewer than min_action_gap
+          # seconds ago.
+          seconds_since_last_action = (
+              self.datetime() - last_action_time).total_seconds()
+          if (seconds_since_last_action <
+              self._config.get(CONF_MIN_ACTION_GAP)):
+            self.log('Blocking attempts to %s output as %i seconds '
+                     '(%s) have not elapsed since the last matching '
+                     ' action: %s' % (
+                activate_key,
+                self._config.get(CONF_MIN_ACTION_GAP),
+                CONF_MIN_ACTION_GAP, output))
+
+            block_seconds = (self._config.get(CONF_MIN_ACTION_GAP) -
+                seconds_since_last_action)
+            self._block_timer.create(seconds=block_seconds)
+            self._update_status()
             return
 
+        if activate:
           self._auto_timer.create()
-          self._hard_timer.create()
-          self._turn_on(output)
-        else:
-          self._turn_off(output)
-        self._last_trigger[on_or_off] = self.get_state(
+        self._activate(output, activate=activate)
+
+        self._last_trigger[activate_key] = self.get_state(
             entity, attribute=KEY_FRIENDLY_NAME)
 
+      self._update_status()
+
+  def _block_timer_expire(self, kwargs):
     self._update_status()
