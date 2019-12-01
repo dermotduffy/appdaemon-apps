@@ -42,7 +42,7 @@ STATUS_VAR_UPDATE_SECONDS = 10
 STATUS_VAR_STATE_MANUAL = 'manual'
 STATUS_VAR_STATE_ACTIVE_TIMER = 'auto_timer'
 STATUS_VAR_STATE_WAITING = 'waiting'
-STATUS_VAR_STATE_BLOCKED = 'blocked'
+STATUS_VAR_STATE_PAUSED = 'paused'
 STATUS_VAR_STATE_DISABLED = 'disabled'
 STATUS_VAR_ATTR_NA = 'N/A'
 STATUS_VAR_ATTR_NONE = 'None'
@@ -59,8 +59,8 @@ STATUS_VAR_ICONS = {
     STATUS_VAR_STATE_MANUAL: 'mdi:hand-left',
     STATUS_VAR_STATE_ACTIVE_TIMER: 'mdi:timer',
     STATUS_VAR_STATE_WAITING: 'mdi:sleep',
-    STATUS_VAR_STATE_BLOCKED: 'mdi:block-helper',
-    STATUS_VAR_STATE_DISABLED: 'mdi:close-circle-outline',
+    STATUS_VAR_STATE_PAUSED: 'mdi:pause',
+    STATUS_VAR_STATE_DISABLED: 'mdi:block-helper',
 }
 
 CONFIG_CONDITION_SCHEMA = vol.Schema(
@@ -209,7 +209,7 @@ class AutoLights(hass.Hass):
         self._config.get(CONF_AUTO_TIMEOUT), name='auto')
     self._hard_timer = Timer(self, self._hard_timer_expire,
         self._config.get(CONF_HARD_TIMEOUT), name='hard')
-    self._block_timer = Timer(self, self._block_timer_expire, name='block')
+    self._pause_timer = Timer(self, self._pause_timer_expire, name='pause')
     self._state_update_timer = Timer(self,
         seconds=DEFAULT_STATE_UPDATE_TIMEOUT, name='state_update')
 
@@ -278,8 +278,8 @@ class AutoLights(hass.Hass):
       }
       if self._is_disabled():
         state = STATUS_VAR_STATE_DISABLED
-      elif self._block_timer:
-        state = STATUS_VAR_STATE_BLOCKED
+      elif self._pause_timer:
+        state = STATUS_VAR_STATE_PAUSED
       elif self._manual_mode:
         state = STATUS_VAR_STATE_MANUAL
       elif self._auto_timer:
@@ -416,9 +416,9 @@ class AutoLights(hass.Hass):
       self._manual_mode = False
 
     # If this state change was not due to an action invoked from this app, then
-    # block triggers for <grace_period>.
+    # pause triggers for <grace_period>.
     if not self._state_update_timer:
-      self._block_timer.create(
+      self._pause_timer.create(
           seconds=self._config.get(CONF_GRACE_PERIOD_TIMEOUT))
     self._update_status()
 
@@ -436,8 +436,8 @@ class AutoLights(hass.Hass):
     if self._is_disabled():
       self.log('Disabled: Skipping trigger for: %s' % entity)
       return
-    elif self._block_timer:
-      self.log('Blocked: Skipping trigger for: %s' % entity)
+    elif self._pause_timer:
+      self.log('Pasued: Skipping trigger for: %s' % entity)
       return
     elif self._manual_mode:
       self.log('Manual mode: Skipping trigger for: %s' % entity)
@@ -454,13 +454,13 @@ class AutoLights(hass.Hass):
     if triggered:
       output = self._get_best_matching_output()
       if output:
-        # Safety precaution: Block changes if more distinct actions than
+        # Safety precaution: Pause changes if more distinct actions than
         # max_actions_per_min (avoid lights flapping due to more configuration
         # choices).  (e.g. imagine a trigger than turns lights on when
         # brightness dips below X, but turns them off when it rises above X: a
         # poorly configured instance could cause the lights to flap)
         # Implicitly, this is allowing multiple repitions of the same action
-        # with no blocking (e.g. repeatedly turning on the same light due to
+        # with no pauseing (e.g. repeatedly turning on the same light due to
         # walking past multiple motion sensors is just fine).
         self.log('Last-actions: %s' % self._last_actions)
 
@@ -469,14 +469,14 @@ class AutoLights(hass.Hass):
         max_actions_per_min = self._config.get(CONF_MAX_ACTIONS_PER_MIN)
 
         if self._distinct_last_actions() >= max_actions_per_min:
-          self.log('Blocking attempts to %s output as >%i (%s) distinct '
+          self.log('Pausing attempts to %s output as >%i (%s) distinct '
                    'actions have been executed in the last minute: %s' % (
               activate_key,
               max_actions_per_min,
               CONF_MAX_ACTIONS_PER_MIN,
               output))
-          # Block for 1 minute (it's max actions per minute).
-          self._block_timer.create(seconds=1*60)
+          # Pause for 1 minute (it's max actions per minute).
+          self._pause_timer.create(seconds=1*60)
           self._update_status()
           return
 
@@ -489,7 +489,7 @@ class AutoLights(hass.Hass):
 
         self._update_status()
 
-  def _block_timer_expire(self, kwargs):
+  def _pause_timer_expire(self, kwargs):
     self._update_status()
 
   def _extend_callback(self, entity, attribute, old, new, kwargs):
