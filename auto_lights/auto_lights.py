@@ -114,7 +114,7 @@ def timedelta_to_str(td):
 
 @functools.total_ordering
 class Timer(object):
-  def __init__(self, app, func, seconds=None, name='timer', kwargs=None):
+  def __init__(self, app, func=None, seconds=None, name='timer', kwargs=None):
     self._app = app
     self._func = func
     self._seconds = seconds
@@ -159,8 +159,8 @@ class Timer(object):
     try:
       # Reset internals first so callbacks can see that timer has finished.
       self._raw_reset()
-      result = func(kwargs)
-      return result
+      if func:
+        func(kwargs)
     except Exception as e:
       # Funnel exceptions through the Appdaemon logger (otherwise we won't see
       # them at all)
@@ -357,6 +357,12 @@ class AutoLights(hass.Hass):
 
     self._update_status()
 
+  def _seconds_since_dt(self, dt):
+    return (self.datetime() - dt).total_seconds()
+
+  def _within_window(self, dt, window):
+    return self._seconds_since_dt(dt) < window
+
   def _trigger_callback(self, entity, attribute, old, new, kwargs):
     activate = kwargs[KEY_ACTIVATE]
     self.log('Trigger callback (activate=%s): %s (old: %s, new: %s)' % (
@@ -377,25 +383,32 @@ class AutoLights(hass.Hass):
     if triggered:
       output = self._get_best_matching_output()
       if output:
-        last_action_time = self._last_actions[activate_key]
-
-        if last_action_time:
-          # Block actions if the last time this same action
-          # (activate/deactivate) was attempted was fewer than min_action_gap
-          # seconds ago.
-          seconds_since_last_action = (
-              self.datetime() - last_action_time).total_seconds()
-          if (seconds_since_last_action <
-              self._config.get(CONF_MIN_ACTION_GAP)):
+        min_action_gap = self._config.get(CONF_MIN_ACTION_GAP)
+        last_activated = self._last_actions[KEY_ACTIVATE]
+        last_deactivated = self._last_actions[KEY_DEACTIVATE]
+        # Bit complex: As a safety precaution, we want to block this action
+        # if the last time this same action (activate/deactivate) was fewer
+        # than min_action_gap, AND if the opposite of this action was more
+        # recent than this action. This is to stop accidental light 'flapping'
+        # due to competing triggers (e.g. imagine a trigger than turns lights
+        # on when brightness dips below X, but turns them off when it rises
+        # above X: a poorly configured instance could cause the lights to flap)
+        # Implicitly, this is allowing multiple repitions of the same action
+        # within min_action_gap (e.g. repeatedly turning on the same light
+        # due to walking past multiple motion sensors)
+        if (last_activated and last_deactivated and
+            self._within_window(last_activated, min_action_gap) and
+            self._within_window(last_deactivated, min_action_gap) and
+            ((last_activated > last_deactivated and not activate) or
+             (last_activated < last_deactivated and activate))):
             self.log('Blocking attempts to %s output as %i seconds '
                      '(%s) have not elapsed since the last matching '
                      ' action: %s' % (
                 activate_key,
-                self._config.get(CONF_MIN_ACTION_GAP),
+                min_action_gap,
                 CONF_MIN_ACTION_GAP, output))
-
-            block_seconds = (self._config.get(CONF_MIN_ACTION_GAP) -
-                seconds_since_last_action)
+            block_seconds = (min_action_gap - self._seconds_since_dt(
+                last_activated if activate else last_deactivated))
             self._block_timer.create(seconds=block_seconds)
             self._update_status()
             return
