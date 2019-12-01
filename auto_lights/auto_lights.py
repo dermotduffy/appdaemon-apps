@@ -341,7 +341,6 @@ class AutoLights(hass.Hass):
       else:
         self.turn_off(entity[CONF_ENTITY_ID], **data)
 
-    self._prune_last_actions()
     self._last_actions.insert(0, (self.datetime(), activate))
 
   def _prune_last_actions(self):
@@ -436,7 +435,10 @@ class AutoLights(hass.Hass):
         # walking past multiple motion sensors is just fine).
         self.log('Last-actions: %s' % self._last_actions)
 
+        # Prune actions to only the last 1 minute worth.
+        self._prune_last_actions()
         max_actions_per_min = self._config.get(CONF_MAX_ACTIONS_PER_MIN)
+
         if self._distinct_last_actions() >= max_actions_per_min:
           self.log('Blocking attempts to %s output as >%i (%s) distinct '
                    'actions have been executed in the last minute: %s' % (
