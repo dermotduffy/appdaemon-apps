@@ -17,18 +17,21 @@ CONF_DEACTIVATE_ENTITIES = 'deactivate_entities'
 CONF_STATE_ENTITIES = 'state_entities'
 CONF_AUTO_TIMEOUT = 'auto_timeout'
 CONF_HARD_TIMEOUT = 'hard_timeout'
+CONF_GRACE_PERIOD_TIMEOUT = 'grace_timeout'
 CONF_OUTPUT = 'output'
 CONF_ENTITY_ID = 'entity_id'
 CONF_SERVICE = 'service'
 CONF_ON_STATE = 'on_state'
 CONF_STATUS_VAR = 'status_var'
-CONF_MIN_ACTION_GAP = 'min_action_gap'
+CONF_MAX_ACTIONS_PER_MIN = 'max_actions_per_min'
 CONF_SERVICE_DATA = 'service_data'
 
 DEFAULT_AUTO_TIMEOUT = 60*15
 DEFAULT_HARD_TIMEOUT = 60*60*3
+DEFAULT_GRACE_PERIOD_TIMEOUT = 30
 DEFAULT_ON_STATE = 'on'
-DEFAULT_MIN_ACTION_GAP = 60
+DEFAULT_STATE_UPDATE_TIMEOUT=5
+DEFAULT_MAX_ACTIONS_PER_MIN=4
 
 KEY_FRIENDLY_NAME = 'friendly_name'
 KEY_ACTIVATE = 'activate'
@@ -102,8 +105,11 @@ CONFIG_SCHEMA = vol.Schema({
                default=DEFAULT_AUTO_TIMEOUT): vol.Range(min=60),
   vol.Optional(CONF_HARD_TIMEOUT,
                default=DEFAULT_HARD_TIMEOUT): vol.Range(min=300),
-  vol.Optional(CONF_MIN_ACTION_GAP,
-               default=DEFAULT_MIN_ACTION_GAP): vol.Range(min=60),
+  vol.Optional(CONF_GRACE_PERIOD_TIMEOUT,
+               default=DEFAULT_GRACE_PERIOD_TIMEOUT): vol.Range(min=0),
+  vol.Optional(CONF_MAX_ACTIONS_PER_MIN,
+               default=DEFAULT_MAX_ACTIONS_PER_MIN): vol.Range(min=0),
+
   vol.Required(CONF_OUTPUT): OUTPUT_SCHEMA,
 }, extra=vol.ALLOW_EXTRA)
 
@@ -183,10 +189,7 @@ class Timer(object):
 class AutoLights(hass.Hass):
   def initialize(self):
     self._manual_mode = False
-    self._last_actions = {
-        KEY_ACTIVATE: None,
-        KEY_DEACTIVATE: None,
-    }
+    self._last_actions = []
     self._last_trigger = {
         KEY_ACTIVATE: None,
         KEY_DEACTIVATE: None
@@ -200,6 +203,9 @@ class AutoLights(hass.Hass):
     self._hard_timer = Timer(self, self._hard_timer_expire,
         self._config.get(CONF_HARD_TIMEOUT), name='hard')
     self._block_timer = Timer(self, self._block_timer_expire, name='block')
+
+    self._state_update_timer = Timer(self,
+        seconds=DEFAULT_STATE_UPDATE_TIMEOUT, name='state_update')
 
     trigger_activate_entities = conditions.extract_entities_from_condition(
         self._config.get(CONF_TRIGGER_ACTIVATE_CONDITION))
@@ -258,10 +264,10 @@ class AutoLights(hass.Hass):
           STATUS_VAR_ATTR_EXTEND: STATUS_VAR_ATTR_EXTEND_NEVER,
       }
 
-      if self._manual_mode:
-        state = STATUS_VAR_STATE_MANUAL
-      elif self._block_timer:
+      if self._block_timer:
         state = STATUS_VAR_STATE_BLOCKED
+      elif self._manual_mode:
+        state = STATUS_VAR_STATE_MANUAL
       elif self._auto_timer:
         state = STATUS_VAR_STATE_ACTIVE_TIMER
       attributes[STATUS_VAR_ATTR_ICON] = STATUS_VAR_ICONS[state]
@@ -324,6 +330,9 @@ class AutoLights(hass.Hass):
       if output[CONF_DEACTIVATE_ENTITIES]:
         entities = output[CONF_DEACTIVATE_ENTITIES]
 
+    if entities:
+      self._state_update_timer.create()
+
     for entity in entities:
       data = entity.get(CONF_SERVICE_DATA, {})
       service = entity.get(CONF_SERVICE, default_service)
@@ -332,8 +341,25 @@ class AutoLights(hass.Hass):
       else:
         self.turn_off(entity[CONF_ENTITY_ID], **data)
 
-    self._last_actions[
-        KEY_ACTIVATE if activate else KEY_DEACTIVATE] = self.datetime()
+    self._prune_last_actions()
+    self._last_actions.insert(0, (self.datetime(), activate))
+
+  def _prune_last_actions(self):
+    # Only keep 1 minute worth of last actions.
+    for tpl in self._last_actions:
+      if self._seconds_since_dt(tpl[0]) >= 60:
+        self._last_actions.remove(tpl)
+
+  def _distinct_last_actions(self):
+    last_activate = None
+    distinct = 0
+    for (dt, activate) in self._last_actions:
+      if last_activate is None:
+        distinct = 1
+      elif last_activate != activate:
+        distinct += 1
+      last_activate = activate
+    return distinct
 
   def _has_on_state_entity(self):
     for entity in self._state_entities:
@@ -343,18 +369,32 @@ class AutoLights(hass.Hass):
 
   def _state_callback(self, entity, attribute, old, new, kwargs):
     self.log('State callback: %s (old: %s, new: %s)' % (entity, old, new))
+
+    # A note on manual mode: Manual mode is not enabled when any
+    # state change happens during automated lighting. The assumption is that
+    # automated lighting will be the norm for a room, and so automations that
+    # impact that lighting do not constitute conversion to manual mode (e.g.
+    # status controller events).  Automations that work outside of automated
+    # lighting times will indeed convert this to manual mode.
+
     if self._has_on_state_entity():
       # A changing state entity resets the timers.
       self._hard_timer.create()
 
       if not self._auto_timer:
-        # Effectively moves into manual mode.
+        # If there's a light on, but we're not automated lighting, then it's
+        # manual mode (see note above).
         self._manual_mode = True
     else:
       self._auto_timer.cancel()
       self._hard_timer.cancel()
       self._manual_mode = False
 
+    # If this state change was not due to an action invoked from this app, then
+    # block triggers for <grace_period>.
+    if not self._state_update_timer:
+      self._block_timer.create(
+          seconds=self._config.get(CONF_GRACE_PERIOD_TIMEOUT))
     self._update_status()
 
   def _seconds_since_dt(self, dt):
@@ -368,7 +408,10 @@ class AutoLights(hass.Hass):
     self.log('Trigger callback (activate=%s): %s (old: %s, new: %s)' % (
         activate, entity, old, new))
 
-    if self._manual_mode:
+    if self._block_timer:
+      self.log('Skipping trigger due to being blocked: %s' % entity)
+      return
+    elif self._manual_mode:
       self.log('Skipping trigger due to manual mode: %s' % entity)
       return
 
@@ -383,35 +426,28 @@ class AutoLights(hass.Hass):
     if triggered:
       output = self._get_best_matching_output()
       if output:
-        min_action_gap = self._config.get(CONF_MIN_ACTION_GAP)
-        last_activated = self._last_actions[KEY_ACTIVATE]
-        last_deactivated = self._last_actions[KEY_DEACTIVATE]
-        # Bit complex: As a safety precaution, we want to block this action
-        # if the last time this same action (activate/deactivate) was fewer
-        # than min_action_gap, AND if the opposite of this action was more
-        # recent than this action. This is to stop accidental light 'flapping'
-        # due to competing triggers (e.g. imagine a trigger than turns lights
-        # on when brightness dips below X, but turns them off when it rises
-        # above X: a poorly configured instance could cause the lights to flap)
+        # Safety precaution: Block changes if more distinct actions than
+        # max_actions_per_min (avoid lights flapping due to more configuration
+        # choices).  (e.g. imagine a trigger than turns lights on when
+        # brightness dips below X, but turns them off when it rises above X: a
+        # poorly configured instance could cause the lights to flap)
         # Implicitly, this is allowing multiple repitions of the same action
-        # within min_action_gap (e.g. repeatedly turning on the same light
-        # due to walking past multiple motion sensors)
-        if (last_activated and last_deactivated and
-            self._within_window(last_activated, min_action_gap) and
-            self._within_window(last_deactivated, min_action_gap) and
-            ((last_activated > last_deactivated and not activate) or
-             (last_activated < last_deactivated and activate))):
-            self.log('Blocking attempts to %s output as %i seconds '
-                     '(%s) have not elapsed since the last matching '
-                     ' action: %s' % (
-                activate_key,
-                min_action_gap,
-                CONF_MIN_ACTION_GAP, output))
-            block_seconds = (min_action_gap - self._seconds_since_dt(
-                last_activated if activate else last_deactivated))
-            self._block_timer.create(seconds=block_seconds)
-            self._update_status()
-            return
+        # with no blocking (e.g. repeatedly turning on the same light due to
+        # walking past multiple motion sensors is just fine).
+        self.log('Last-actions: %s' % self._last_actions)
+
+        max_actions_per_min = self._config.get(CONF_MAX_ACTIONS_PER_MIN)
+        if self._distinct_last_actions() >= max_actions_per_min:
+          self.log('Blocking attempts to %s output as >%i (%s) distinct '
+                   'actions have been executed in the last minute: %s' % (
+              activate_key,
+              max_actions_per_min,
+              CONF_MAX_ACTIONS_PER_MIN,
+              output))
+          # Block for 1 minute (it's max actions per minute).
+          self._block_timer.create(seconds=1*60)
+          self._update_status()
+          return
 
         if activate:
           self._auto_timer.create()
