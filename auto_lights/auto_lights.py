@@ -416,6 +416,7 @@ class AutoLights(hass.Hass):
         # If there's a light on, but we're not automated lighting, then it's
         # manual mode (see note above).
         self._manual_mode = True
+        self.log('Changed to manual mode: %s (%s->%s)' % (entity, old, new))
     else:
       self._auto_timer.cancel()
       self._hard_timer.cancel()
