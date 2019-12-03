@@ -443,7 +443,7 @@ class AutoLights(hass.Hass):
       self.log('Disabled: Skipping trigger for: %s' % entity)
       return
     elif self._pause_timer:
-      self.log('Pasued: Skipping trigger for: %s' % entity)
+      self.log('Paused: Skipping trigger for: %s' % entity)
       return
     elif self._manual_mode:
       self.log('Manual mode: Skipping trigger for: %s' % entity)
