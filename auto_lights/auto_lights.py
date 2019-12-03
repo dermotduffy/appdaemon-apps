@@ -31,7 +31,7 @@ DEFAULT_AUTO_TIMEOUT = 60*15
 DEFAULT_HARD_TIMEOUT = 60*60*3
 DEFAULT_GRACE_PERIOD_TIMEOUT = 30
 DEFAULT_ON_STATE = 'on'
-DEFAULT_STATE_UPDATE_TIMEOUT=5
+DEFAULT_STATE_UPDATE_TIMEOUT=3
 DEFAULT_MAX_ACTIONS_PER_MIN=4
 
 KEY_FRIENDLY_NAME = 'friendly_name'
@@ -412,9 +412,12 @@ class AutoLights(hass.Hass):
       # A changing state entity resets the timers.
       self._hard_timer.create()
 
-      if not self._auto_timer:
-        # If there's a light on, but we're not automated lighting, then it's
-        # manual mode (see note above).
+      if not self._state_update_timer:
+        # If there's a light on, but there was not a change made by this app,
+        # change to manual mode. We cannot use the expiry timers here, as there
+        # may be a time delay between those timers expiring and the new state
+        # arriving here (which is exactly what the state timer is designed to
+        # work around).
         self._manual_mode = True
         self.log('Changed to manual mode: %s (%s->%s)' % (entity, old, new))
     else:
