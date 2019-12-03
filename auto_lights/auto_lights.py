@@ -362,9 +362,9 @@ class AutoLights(hass.Hass):
 
     for entity in entities:
       data = (override_data if override_data is not None else
-          entity.get(CONF_SERVICE_DATA, {}))
+          entity[CONF_SERVICE_DATA])
       service = (override_service if override_service is not None else
-          entity.get[CONF_SERVICE])
+          entity[CONF_SERVICE])
       if service == SERVICE_TURN_ON:
         self.turn_on(entity[CONF_ENTITY_ID], **data)
       else:
