@@ -79,16 +79,12 @@ ENTITY_SCHEMA = vol.Schema({
   vol.Optional(CONF_ON_STATE, default=DEFAULT_ON_STATE): str,
 }, extra=vol.PREVENT_EXTRA)
 ACTIVATE_ENTITIES = ENTITY_SCHEMA.extend({
-  # Service is optional, as if unspecified we want service to be
-  # inferred from the context (i.e. if an activate_entity is used
-  # because no deactivate_entity is specified, then the default
-  # service should be 'turn_off', rather than 'turn_on'.
-  vol.Optional(CONF_SERVICE): vol.In(VALID_SERVICES),
-  vol.Optional(CONF_SERVICE_DATA): SERVICE_DATA,
+  vol.Optional(CONF_SERVICE, default=SERVICE_TURN_ON): vol.In(VALID_SERVICES),
+  vol.Optional(CONF_SERVICE_DATA, default={}): SERVICE_DATA,
 }, extra=vol.ALLOW_EXTRA)
 DEACTIVATE_ENTITIES = ENTITY_SCHEMA.extend({
-  vol.Optional(CONF_SERVICE): vol.In(VALID_SERVICES),
-  vol.Optional(CONF_SERVICE_DATA): SERVICE_DATA,
+  vol.Optional(CONF_SERVICE, default=SERVICE_TURN_OFF): vol.In(VALID_SERVICES),
+  vol.Optional(CONF_SERVICE_DATA, default={}): SERVICE_DATA,
 }, extra=vol.ALLOW_EXTRA)
 
 OUTPUT_SCHEMA = vol.Schema([{
@@ -345,20 +341,30 @@ class AutoLights(hass.Hass):
     self.log('%s output: %s' % (
         'Activating' if activate else 'Deactivating', output))
 
-    entities = output[CONF_ACTIVATE_ENTITIES]
+    override_service = None
+    override_data = None
+
     if activate:
-      default_service = SERVICE_TURN_ON
+      entities = output[CONF_ACTIVATE_ENTITIES]
     else:
-      default_service = SERVICE_TURN_OFF
       if output[CONF_DEACTIVATE_ENTITIES]:
         entities = output[CONF_DEACTIVATE_ENTITIES]
+      else:
+        # If deactivation entities are not provided, go with the activation
+        # entities, however override the service to be turn_off, and remove the
+        # data (as it will otherwise cause an off call to fail).
+        entities = output[CONF_ACTIVATE_ENTITIES]
+        override_service = SERVICE_TURN_OFF
+        override_data = {}
 
     if entities:
       self._state_update_timer.create()
 
     for entity in entities:
-      data = entity.get(CONF_SERVICE_DATA, {})
-      service = entity.get(CONF_SERVICE, default_service)
+      data = (override_data if override_data is not None else
+          entity.get(CONF_SERVICE_DATA, {}))
+      service = (override_service if override_service is not None else
+          entity.get[CONF_SERVICE])
       if service == SERVICE_TURN_ON:
         self.turn_on(entity[CONF_ENTITY_ID], **data)
       else:
