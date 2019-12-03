@@ -66,13 +66,30 @@ def evaluator_DEFAULT(app, current_time, key, condition, triggers,
                       evaluators, default_evaluator, operator, kind, **kwargs):
   for numeric_operator in ('<=', '<', '>=', '>'):
     if condition.startswith(numeric_operator):
-      rval = float(condition[len(numeric_operator):])
       if kind == CONF_KIND_TRIGGER:
         if key not in triggers:
           return False
-        lval = float(triggers[key])
+        lval_str = triggers[key]
       else:
-        lval = float(app.get_state(key))
+        lval_str = app.get_state(key)
+      rval_str =  condition[len(numeric_operator):]
+
+      try:
+        rval = float(rval_str)
+      except ValueError:
+        app.log("Warning: Could not convert '%s' to rval float in condition "
+                "evaluation. Configuration is incorrect. Condition will "
+                "always evaluate false: key='%s', condition='%s'" % (
+            (rval_str, key, condition)))
+        return False
+
+      try:
+        lval = float(lval_str)
+      except ValueError:
+        app.log("Warning: Could not convert '%s' to lval float in condition "
+                "evaluation. Condition will always evaluate false: "
+                "key='%s', condition='%s'" % (lval_str, key, condition))
+        return False
 
       if numeric_operator == '<=':
         return lval <= rval
