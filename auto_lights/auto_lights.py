@@ -16,7 +16,7 @@ CONF_CONDITION = 'condition'
 CONF_ACTIVATE_ENTITIES = 'activate_entities'
 CONF_DEACTIVATE_ENTITIES = 'deactivate_entities'
 CONF_STATE_ENTITIES = 'state_entities'
-CONF_AUTO_TIMEOUT = 'auto_timeout'
+CONF_SOFT_TIMEOUT = 'soft_timeout'
 CONF_HARD_TIMEOUT = 'hard_timeout'
 CONF_GRACE_PERIOD_TIMEOUT = 'grace_timeout'
 CONF_OUTPUT = 'output'
@@ -27,7 +27,7 @@ CONF_STATUS_VAR = 'status_var'
 CONF_MAX_ACTIONS_PER_MIN = 'max_actions_per_min'
 CONF_SERVICE_DATA = 'service_data'
 
-DEFAULT_AUTO_TIMEOUT = 60*15
+DEFAULT_SOFT_TIMEOUT = 60*15
 DEFAULT_HARD_TIMEOUT = 60*60*3
 DEFAULT_GRACE_PERIOD_TIMEOUT = 30
 DEFAULT_ON_STATE = 'on'
@@ -40,7 +40,7 @@ KEY_DEACTIVATE = 'deactivate'
 
 STATUS_VAR_UPDATE_SECONDS = 10
 STATUS_VAR_STATE_MANUAL = 'manual'
-STATUS_VAR_STATE_ACTIVE_TIMER = 'auto_timer'
+STATUS_VAR_STATE_ACTIVE_TIMER = 'active_timer'
 STATUS_VAR_STATE_WAITING = 'waiting'
 STATUS_VAR_STATE_PAUSED = 'paused'
 STATUS_VAR_STATE_DISABLED = 'disabled'
@@ -102,8 +102,8 @@ CONFIG_SCHEMA = vol.Schema({
   vol.Optional(CONF_EXTEND_CONDITION, default=[]): CONFIG_CONDITION_SCHEMA,
   vol.Optional(CONF_DISABLE_CONDITION, default=[]): CONFIG_CONDITION_SCHEMA,
   vol.Optional(CONF_STATE_ENTITIES): [ENTITY_SCHEMA],
-  vol.Optional(CONF_AUTO_TIMEOUT,
-               default=DEFAULT_AUTO_TIMEOUT): vol.Range(min=60),
+  vol.Optional(CONF_SOFT_TIMEOUT,
+               default=DEFAULT_SOFT_TIMEOUT): vol.Range(min=60),
   vol.Optional(CONF_HARD_TIMEOUT,
                default=DEFAULT_HARD_TIMEOUT): vol.Range(min=300),
   vol.Optional(CONF_GRACE_PERIOD_TIMEOUT,
@@ -184,7 +184,8 @@ class Timer(object):
   def __bool__(self):
     return self._handle is not None
   def __repr__(self):
-    return '<Timer:%s,%s>' % (self._name, self.get_time_until_expire_string())
+    return '<Timer:%s,%s,%s>' % (self._name,
+        self.get_time_until_expire_string(), self._handle)
 
 # A note on state: As much as possible, attempt to store the authoritative
 # state in HA (retrieved via Appdaemon get_state(), not here.
@@ -201,10 +202,7 @@ class AutoLights(hass.Hass):
     self._config = CONFIG_SCHEMA(self.args)
     self._status_var = self._config.get(CONF_STATUS_VAR)
 
-    self._auto_timer = Timer(self, self._auto_timer_expire,
-        self._config.get(CONF_AUTO_TIMEOUT), name='auto')
-    self._hard_timer = Timer(self, self._hard_timer_expire,
-        self._config.get(CONF_HARD_TIMEOUT), name='hard')
+    self._main_timer = Timer(self, self._main_timer_expire, name='main')
     self._pause_timer = Timer(self, self._pause_timer_expire, name='pause')
     self._state_update_timer = Timer(self,
         seconds=DEFAULT_STATE_UPDATE_TIMEOUT, name='state_update')
@@ -224,13 +222,19 @@ class AutoLights(hass.Hass):
         self._state_callback)
 
     if self._has_on_state_entity():
-      self._hard_timer.create()
+      self._main_timer.create(seconds=self._get_soft_timeout())
 
     if self._status_var:
       self.run_every(
           self._update_status,
           self.datetime(),
           STATUS_VAR_UPDATE_SECONDS)
+
+  def _get_soft_timeout(self):
+    return self._config.get(CONF_SOFT_TIMEOUT)
+
+  def _get_hard_timeout(self):
+    return self._config.get(CONF_HARD_TIMEOUT)
 
   def _listen_condition(self, name, conf_condition, func, **kwargs):
     entities = conditions.extract_entities_from_condition(
@@ -274,18 +278,18 @@ class AutoLights(hass.Hass):
       }
       if self._is_disabled():
         state = STATUS_VAR_STATE_DISABLED
+        attributes[STATUS_VAR_ATTR_DISABLED] = STATUS_VAR_ATTR_YES
       elif self._pause_timer:
         state = STATUS_VAR_STATE_PAUSED
       elif self._manual_mode:
         state = STATUS_VAR_STATE_MANUAL
-      elif self._auto_timer:
+      elif self._main_timer:
         state = STATUS_VAR_STATE_ACTIVE_TIMER
       attributes[STATUS_VAR_ATTR_ICON] = STATUS_VAR_ICONS[state]
 
-      timers = sorted((self._auto_timer, self._hard_timer))
-      if timers[0]:
+      if self._main_timer:
         attributes[STATUS_VAR_ATTR_TIME_REMAINING] = (
-            timers[0].get_time_until_expire_string())
+            self._main_timer.get_time_until_expire_string())
 
       for key in (KEY_ACTIVATE, KEY_DEACTIVATE):
         if self._last_trigger[key]:
@@ -297,9 +301,6 @@ class AutoLights(hass.Hass):
           attributes[STATUS_VAR_ATTR_EXTEND] = STATUS_VAR_ATTR_YES
         else:
           attributes[STATUS_VAR_ATTR_EXTEND] = STATUS_VAR_ATTR_NO
-
-      if self._config.get(CONF_DISABLE_CONDITION) and self._is_disabled():
-          attributes[STATUS_VAR_ATTR_DISABLED] = STATUS_VAR_ATTR_YES
 
       self.set_state(self._status_var, state=state, attributes=attributes)
 
@@ -315,20 +316,13 @@ class AutoLights(hass.Hass):
             self, self.datetime().time(),
             self._config.get(CONF_DISABLE_CONDITION)))
 
-  def _auto_timer_expire(self, kwargs):
-    self.log('Auto timer expired at %s' % self.datetime())
+  def _main_timer_expire(self, kwargs):
+    self.log('Main timer expired at %s' % self.datetime())
 
     if self._should_extend():
-      self.log('Extending auto timer ...')
-      self._auto_timer.create()
+      self.log('Extending main timer ...')
+      self._main_timer.create(self._get_soft_timeout())
       return
-
-    output = self._get_best_matching_output()
-    if output:
-      self._deactivate(output)
-
-  def _hard_timer_expire(self, kwargs):
-    self.log('Hard timer expired at %s' % self.datetime())
 
     output = self._get_best_matching_output()
     if output:
@@ -370,18 +364,25 @@ class AutoLights(hass.Hass):
       else:
         self.turn_off(entity[CONF_ENTITY_ID], **data)
 
-    self._last_actions.insert(0, (self.datetime(), activate))
+    self._last_actions.insert(0, (self.datetime(), activate, output))
 
   def _prune_last_actions(self):
-    # Only keep 1 minute worth of last actions.
-    for tpl in self._last_actions:
-      if self._seconds_since_dt(tpl[0]) >= 60:
-        self._last_actions.remove(tpl)
+    # Retain every action from the last minute, or minimum of 1 action
+    # (regardless of time).
+    out_last_actions = []
 
-  def _distinct_last_actions(self):
+    for tpl in self._last_actions:
+      if self._seconds_since_dt(tpl[0]) < 60:
+        out_last_actions.append(tpl)
+    if not out_last_actions and self._last_actions:
+      out_last_actions.append(self._last_actions[0])
+    self._last_actions = out_last_actions
+
+  def _opposing_last_actions(self):
+    """Return how many distinct last actions (e.g. on->off->on == 3)."""
     last_activate = None
     distinct = 0
-    for (dt, activate) in self._last_actions:
+    for (dt, activate, output) in self._last_actions:
       if last_activate is None:
         distinct = 1
       elif last_activate != activate:
@@ -409,20 +410,19 @@ class AutoLights(hass.Hass):
     # status controller events).  Automations that work outside of automated
     # lighting times will indeed convert this to manual mode.
     if self._has_on_state_entity():
-      # A changing state entity resets the timers.
-      self._hard_timer.create()
-
-      if not self._state_update_timer:
+      if not self._state_update_timer and not self._main_timer:
         # If there's a light on, but there was not a change made by this app,
         # change to manual mode. We cannot use the expiry timers here, as there
         # may be a time delay between those timers expiring and the new state
         # arriving here (which is exactly what the state timer is designed to
         # work around).
-        self._manual_mode = True
         self.log('Changed to manual mode: %s (%s->%s)' % (entity, old, new))
+        self._manual_mode = True
+
+        # A changing state entity resets the timer.
+        self._main_timer.create(seconds=self._get_hard_timeout())
     else:
-      self._auto_timer.cancel()
-      self._hard_timer.cancel()
+      self._main_timer.cancel()
       self._manual_mode = False
 
     # If this state change was not due to an action invoked from this app, then
@@ -430,6 +430,7 @@ class AutoLights(hass.Hass):
     if not self._state_update_timer:
       self._pause_timer.create(
           seconds=self._config.get(CONF_GRACE_PERIOD_TIMEOUT))
+
     self._update_status()
 
   def _seconds_since_dt(self, dt):
@@ -478,7 +479,7 @@ class AutoLights(hass.Hass):
         self._prune_last_actions()
         max_actions_per_min = self._config.get(CONF_MAX_ACTIONS_PER_MIN)
 
-        if self._distinct_last_actions() >= max_actions_per_min:
+        if self._opposing_last_actions() >= max_actions_per_min:
           self.log('Pausing attempts to %s output as >%i (%s) distinct '
                    'actions have been executed in the last minute: %s' % (
               activate_key,
@@ -490,9 +491,16 @@ class AutoLights(hass.Hass):
           self._update_status()
           return
 
-        if activate:
-          self._auto_timer.create()
-        self._activate(output, activate=activate)
+        if (activate and self._main_timer and self._last_actions and
+            self._last_actions[0][1] == activate and
+            self._last_actions[0][2] == output):
+          self.log('Same output triggered by %s. '
+                   'Resetting timer only.' % entity)
+          self._main_timer.create(self._get_soft_timeout())
+        else:
+          if activate:
+            self._main_timer.create(self._get_soft_timeout())
+          self._activate(output, activate=activate)
 
         self._last_trigger[activate_key] = self.get_state(
             entity, attribute=KEY_FRIENDLY_NAME)
@@ -507,11 +515,12 @@ class AutoLights(hass.Hass):
 
   def _disable_callback(self, entity, attribute, old, new, kwargs):
     if self._is_disabled():
-      self._auto_timer.cancel()
-      self._hard_timer.cancel()
+      self.log('Disabled: Triggered by %s (%s->%s)' % (entity, old, new))
+      self._main_timer.cancel()
     else:
-      if self._has_on_state_entity() and not self._hard_timer:
-        self._hard_timer.create()
+      self.log('Enabled: Triggered by %s (%s->%s)' % (entity, old, new))
+      if self._has_on_state_entity() and not self._main_timer:
+        self._main_timer.create(self._get_soft_timeout())
       self._manual_mode = False
 
     self._update_status()
