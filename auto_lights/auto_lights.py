@@ -491,6 +491,9 @@ class AutoLights(hass.Hass):
           self._update_status()
           return
 
+        # If this would just activate the exact same output, just reset
+        # the timer rather than re-activating (as otherwise we lose custom
+        # adjustments made to the lighting).
         if (activate and self._main_timer and self._last_actions and
             self._last_actions[0][1] == activate and
             self._last_actions[0][2] == output):
