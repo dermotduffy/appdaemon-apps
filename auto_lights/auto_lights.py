@@ -428,6 +428,8 @@ class AutoLights(hass.Hass):
     # If this state change was not due to an action invoked from this app, then
     # pause triggers for <grace_period>.
     if not self._state_update_timer:
+      self.log('Pausing due externally applied state change: %s (%s->%s)' % (
+          entity, old, new))
       self._pause_timer.create(
           seconds=self._config.get(CONF_GRACE_PERIOD_TIMEOUT))
 
