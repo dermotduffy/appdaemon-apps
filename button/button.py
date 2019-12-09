@@ -38,12 +38,12 @@ class Button(hass.Hass):
     return data
 
   def handle_button_event(self, event_name, data, kwargs):
-    self.log('Received button event: (%s, %s, %s)' % (
-        event_name, data, kwargs))
-
     command = data.get(KEY_COMMAND)
     if command not in self.args:
       return
+
+    self.log('Received button event: (%s, %s, %s)' % (
+        event_name, data, kwargs))
 
     command_args = self.args.get(command)
     if command_args is None:
