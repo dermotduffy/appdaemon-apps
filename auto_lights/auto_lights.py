@@ -467,6 +467,10 @@ class AutoLights(hass.Hass):
     if triggered:
       output = self._get_best_matching_output()
       if output:
+        # Prune last actions list.
+        self._prune_last_actions()
+        self.log('Last-actions: %s' % self._last_actions)
+
         # Safety precaution: Pause changes if more distinct actions than
         # max_actions_per_min (avoid lights flapping due to more configuration
         # choices).  (e.g. imagine a trigger than turns lights on when
@@ -475,10 +479,6 @@ class AutoLights(hass.Hass):
         # Implicitly, this is allowing multiple repitions of the same action
         # with no pauseing (e.g. repeatedly turning on the same light due to
         # walking past multiple motion sensors is just fine).
-        self.log('Last-actions: %s' % self._last_actions)
-
-        # Prune actions to only the last 1 minute worth.
-        self._prune_last_actions()
         max_actions_per_min = self._config.get(CONF_MAX_ACTIONS_PER_MIN)
 
         if self._opposing_last_actions() >= max_actions_per_min:
@@ -495,8 +495,14 @@ class AutoLights(hass.Hass):
 
         # If this would just activate the exact same output, just reset
         # the timer rather than re-activating (as otherwise we lose custom
-        # adjustments made to the lighting).
-        if (activate and self._main_timer and self._last_actions and
+        # adjustments made to the lighting). Allow either the main timer or the
+        # state update timer to be on, as otherwise hass callbacks may cause
+        # issues (e.g. this app is triggered and a scene activates, in the
+        # process of turning on the scene, the outputs are momentarily all off,
+        # which results in a state callback which cancels the main timer due to
+        # all the lights being off).
+        if (activate and (self._main_timer or self._state_update_timer) and
+            self._last_actions and
             self._last_actions[0][1] == activate and
             self._last_actions[0][2] == output):
           self.log('Same output triggered by %s. '
