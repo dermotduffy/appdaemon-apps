@@ -421,7 +421,18 @@ class AutoLights(hass.Hass):
 
         # A changing state entity resets the timer.
         self._main_timer.create(seconds=self._get_hard_timeout())
-    else:
+    elif not self._state_update_timer:
+      # Condition this section on the state update timer not existing. Without
+      # this, it is possible that this apps own actions (e.g. activating scene
+      # B, when scene A is already activated -- with no overlap in entities
+      # between A & B -- will result in HASS firing state callbacks that show
+      # all entities being off (very briefly) -- but that still triggers this
+      # timer cancel, which may result unintentional re-activations of the same
+      # output, which may override changes the user has manually made to the
+      # scene). The tradeoff is that there is a tiny window after this app
+      # makes changes where if the user, at the same time, deactivates all
+      # outputs, then the timer may not get canceled (when the timer expired
+      # the deactivation should have limited impact anyway).
       self._main_timer.cancel()
       self._manual_mode = False
 
@@ -495,14 +506,8 @@ class AutoLights(hass.Hass):
 
         # If this would just activate the exact same output, just reset
         # the timer rather than re-activating (as otherwise we lose custom
-        # adjustments made to the lighting). Allow either the main timer or the
-        # state update timer to be on, as otherwise hass callbacks may cause
-        # issues (e.g. this app is triggered and a scene activates, in the
-        # process of turning on the scene, the outputs are momentarily all off,
-        # which results in a state callback which cancels the main timer due to
-        # all the lights being off).
-        if (activate and (self._main_timer or self._state_update_timer) and
-            self._last_actions and
+        # adjustments made to the lighting).
+        if (activate and self._main_timer and self._last_actions and
             self._last_actions[0][1] == activate and
             self._last_actions[0][2] == output):
           self.log('Same output triggered by %s. '
