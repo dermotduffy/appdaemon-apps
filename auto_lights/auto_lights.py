@@ -421,20 +421,23 @@ class AutoLights(hass.Hass):
 
         # A changing state entity resets the timer.
         self._main_timer.create(seconds=self._get_hard_timeout())
-    elif not self._state_update_timer:
-      # Condition this section on the state update timer not existing. Without
-      # this, it is possible that this apps own actions (e.g. activating scene
-      # B, when scene A is already activated -- with no overlap in entities
-      # between A & B -- will result in HASS firing state callbacks that show
-      # all entities being off (very briefly) -- but that still triggers this
-      # timer cancel, which may result unintentional re-activations of the same
-      # output, which may override changes the user has manually made to the
-      # scene). The tradeoff is that there is a tiny window after this app
-      # makes changes where if the user, at the same time, deactivates all
-      # outputs, then the timer may not get canceled (when the timer expired
-      # the deactivation should have limited impact anyway).
-      self._main_timer.cancel()
+    else:
       self._manual_mode = False
+
+      if not self._state_update_timer:
+        # Condition this section on the state update timer not existing.
+        # Without this, it is possible that this apps own actions (e.g.
+        # activating scene B, when scene A is already activated -- with no
+        # overlap in entities between A & B -- will result in HASS firing state
+        # callbacks that show all entities being off (very briefly) -- but that
+        # still triggers this timer cancel, which may result unintentional
+        # re-activations of the same output, which may override changes the
+        # user has manually made to the scene). The tradeoff is that there is a
+        # tiny window after this app makes changes where if the user, at the
+        # same time, deactivates all outputs, then the timer may not get
+        # canceled (when the timer expired the deactivation should have limited
+        # impact anyway).
+        self._main_timer.cancel()
 
     # If this state change was not due to an action invoked from this app, then
     # pause triggers for <grace_period>.
