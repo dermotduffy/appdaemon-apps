@@ -1,5 +1,6 @@
 import copy
 import datetime
+import json
 import random
 import time
 import threading
@@ -478,6 +479,23 @@ class NotifyAction(ServiceAction):
     if self._title is not None:
       kwargs['title'] = self._title
 
+    self._call_service(self._notify_service, **kwargs)
+
+class MQTTAction(ServiceAction):
+  def __init__(self, app, complete_callback, **kwargs):
+    super().__init__(app, complete_callback, **kwargs)
+
+    self._notify_service = self._pop_argument(scc.CONF_SERVICE)
+    self._topic = self._pop_argument(scc.CONF_ACTION_MQTT_TOPIC)
+    self._payload = self._pop_argument(scc.CONF_ACTION_MQTT_PAYLOAD, json.dumps(self._kwargs))
+
+  def action(self):
+    super().action()
+    with self._lock:
+      if self._is_finished:
+        return
+    kwargs = { scc.CONF_ACTION_MQTT_TOPIC: self._topic,
+               scc.CONF_ACTION_MQTT_PAYLOAD: self._payload }
     self._call_service(self._notify_service, **kwargs)
 
 

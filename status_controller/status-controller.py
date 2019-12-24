@@ -177,6 +177,7 @@ class StatusController(threading.Thread):
 
     # Take the highest output priority, and use that as the event priority.
     outputs = self._get_matching_outputs(event)
+    self._app.log('out: %s' % outputs)
     for output in outputs:
       settings = scc.get_event_arguments(
           self._config,
@@ -186,7 +187,8 @@ class StatusController(threading.Thread):
       if settings[scc.CONF_FORCE]:
         force = True
 
-      for domain in (scc.CONF_SONOS, scc.CONF_LIGHT, scc.CONF_NOTIFY):
+      for domain in (scc.CONF_SONOS, scc.CONF_LIGHT,
+          scc.CONF_NOTIFY, scc.CONF_MQTT):
         if not domain in output:
           continue
         for entry in output[domain]:
@@ -221,8 +223,11 @@ class StatusController(threading.Thread):
     executable_actions.extend(self._create_sonos_actions(event, outputs))
     self._app.log('>>> Creating Light actions: %s' % event)
     executable_actions.extend(self._create_light_actions(event, outputs))
-    self._app.log('>>> Creating Notify event: %s' % event)
+    self._app.log('>>> Creating Notify actions: %s' % event)
     executable_actions.extend(self._create_notify_actions(event, outputs))
+    self._app.log('>>> Creating MQTT actions: %s' % event)
+    executable_actions.extend(self._create_mqtt_actions(event, outputs))
+
     self._app.log('>> Finished creating actions: %s' % event)
     self._app.log('>> Total actions to execute: %i' % len(executable_actions))
 
@@ -401,3 +406,14 @@ class StatusController(threading.Thread):
           notify_actions.append(actions.NotifyAction(
               self._app, self._report_action_finished, **arguments))
     return notify_actions
+
+  def _create_mqtt_actions(self, event, outputs):
+    mqtt_actions = []
+    for output in outputs:
+      if scc.CONF_MQTT in output:
+        for mqtt in output.get(scc.CONF_MQTT):
+          arguments = scc.get_event_arguments(
+              self._config, event, mqtt, scc.CONF_MQTT)
+          mqtt_actions.append(actions.MQTTAction(
+              self._app, self._report_action_finished, **arguments))
+    return mqtt_actions

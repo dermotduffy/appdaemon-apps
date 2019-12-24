@@ -53,6 +53,7 @@ CONF_OUTPUTS = 'outputs'
 CONF_LIGHT = 'light'
 CONF_SONOS = 'sonos'
 CONF_NOTIFY = 'notify'
+CONF_MQTT = 'mqtt'
 CONF_COLOR_NAME = 'color_name'
 CONF_SONOS_VOLUME = 'volume'
 CONF_ENTITIES = 'entities'
@@ -81,6 +82,9 @@ CONF_ACTION_LIGHT_SPEECH = 'speech'
 
 CONF_ACTION_SONOS_TTS = 'speak'
 CONF_ACTION_SONOS_MEDIA_PLAY = 'media_play'
+
+CONF_ACTION_MQTT_TOPIC = 'topic'
+CONF_ACTION_MQTT_PAYLOAD = 'payload'
 
 CONF_FORCE = 'force'
 CONF_MESSAGE = 'message'
@@ -138,6 +142,7 @@ DEFAULT_SONOS_LENGTH = 5
 DEFAULT_SONOS_TTS_SERVICE = 'tts/google_cloud_say'
 DEFAULT_MESSAGE = 'The message was unset'
 DEFAULT_SONOS_CHIME_LENGTH = 3
+DEFAULT_MQTT_SERVICE = 'mqtt/publish'
 
 DEFAULT_FORCE = False
 MIN_PRIORITY = 0
@@ -165,6 +170,10 @@ DEFAULTS_MAPPING = {
   CONF_NOTIFY: {
     CONF_PRIORITY: DEFAULT_PRIORITY,
     CONF_MESSAGE: DEFAULT_MESSAGE,
+  },
+  CONF_MQTT: {
+    CONF_PRIORITY: DEFAULT_PRIORITY,
+    CONF_SERVICE: DEFAULT_MQTT_SERVICE,
   },
   CONF_SETTINGS: {
     CONF_FORCE: DEFAULT_FORCE,
@@ -206,6 +215,11 @@ CONFIG_SCHEMA_NOTIFY_ATTR = CONFIG_SCHEMA_SHARED_ATTR.extend({
   vol.Optional(CONF_TITLE): str,
 }, extra=vol.PREVENT_EXTRA)
 
+CONFIG_SCHEMA_MQTT_ATTR = CONFIG_SCHEMA_SHARED_ATTR.extend({
+  vol.Required(CONF_ACTION_MQTT_TOPIC): str,
+  vol.Optional(CONF_ACTION_MQTT_PAYLOAD): str,
+}, extra=vol.PREVENT_EXTRA)
+
 def ConstrainTime(fmt='%H:%M:%S'):
   return lambda v: datetime.datetime.strptime(v, fmt).time()
 
@@ -244,6 +258,11 @@ CONFIG_SCHEMA_OUTPUT = vol.Schema({
       vol.Required(CONF_SERVICE): str,
     })
   ]),
+  vol.Optional(CONF_MQTT): vol.Schema([
+    CONFIG_SCHEMA_MQTT_ATTR.extend({
+      vol.Optional(CONF_SERVICE): str,
+    })
+  ]),
   vol.Optional(CONF_CONDITION): CONFIG_CONDITION_SCHEMA,
 }, extra=vol.PREVENT_EXTRA)
 
@@ -255,6 +274,8 @@ CONFIG_SCHEMA = vol.Schema({
       vol.Optional(CONF_SETTINGS): CONFIG_SCHEMA_SETTINGS_ATTR,
       vol.Optional(CONF_LIGHT): CONFIG_SCHEMA_LIGHT_ATTR,
       vol.Optional(CONF_SONOS): CONFIG_SCHEMA_SONOS_ATTR,
+      vol.Optional(CONF_NOTIFY): CONFIG_SCHEMA_NOTIFY_ATTR,
+      vol.Optional(CONF_MQTT): CONFIG_SCHEMA_MQTT_ATTR,
     })),
   }, extra=vol.PREVENT_EXTRA),
   vol.Optional(CONF_UNDERLYING_ENTITIES): CONFIG_UNDERLYING_ENTITIES_SCHEMA,
@@ -269,6 +290,7 @@ EVENT_SCHEMA = vol.Schema({
   vol.Optional(CONF_LIGHT): CONFIG_SCHEMA_LIGHT_ATTR,
   vol.Optional(CONF_SONOS): CONFIG_SCHEMA_SONOS_ATTR,
   vol.Optional(CONF_NOTIFY): CONFIG_SCHEMA_NOTIFY_ATTR,
+  vol.Optional(CONF_MQTT): CONFIG_SCHEMA_MQTT_ATTR,
 }, extra=vol.PREVENT_EXTRA)
 
 def get_event_arguments(config, event, output_args, domain):
