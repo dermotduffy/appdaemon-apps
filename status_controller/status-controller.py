@@ -1,6 +1,5 @@
 import copy
 import datetime
-import json
 import logging
 import operator
 import os
@@ -422,7 +421,7 @@ class StatusController(threading.Thread):
           if scc.CONF_ACTION_MQTT_PAYLOAD in arguments:
             template = jinja2.Template(arguments[scc.CONF_ACTION_MQTT_PAYLOAD])
             arguments[scc.CONF_ACTION_MQTT_PAYLOAD] = template.render(
-                tags=json.dumps(event[scc.CONF_TAGS]))
+                tags=event[scc.CONF_TAGS])
           mqtt_actions.append(actions.MQTTAction(
               self._app, self._report_action_finished, **arguments))
     return mqtt_actions
