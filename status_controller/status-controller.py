@@ -12,6 +12,8 @@ import traceback
 import appdaemon.plugins.hass.hassapi as hass
 import voluptuous as vol
 
+import jinja2
+
 import config as scc
 import actions
 import conditions
@@ -415,13 +417,12 @@ class StatusController(threading.Thread):
         for mqtt in output.get(scc.CONF_MQTT):
           arguments = scc.get_event_arguments(
               self._config, event, mqtt, scc.CONF_MQTT)
-          # By default, the MQTT payload is the list of tags (json formatted).
-          if not scc.CONF_ACTION_MQTT_PAYLOAD in arguments:
-            arguments[scc.CONF_ACTION_MQTT_PAYLOAD] = json.dumps({
-                scc.CONF_EVENT: event,
-                scc.CONF_ARGUMENTS: arguments,
-            })
 
+          # Process the payload through jinja2.
+          if scc.CONF_ACTION_MQTT_PAYLOAD in arguments:
+            template = jinja2.Template(arguments[scc.CONF_ACTION_MQTT_PAYLOAD])
+            arguments[scc.CONF_ACTION_MQTT_PAYLOAD] = template.render(
+                tags=json.dumps(event[scc.CONF_TAGS]))
           mqtt_actions.append(actions.MQTTAction(
               self._app, self._report_action_finished, **arguments))
     return mqtt_actions
