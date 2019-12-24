@@ -61,6 +61,8 @@ CONF_ENTITY_ID = 'entity_id'
 CONF_UNDERLYING_ENTITIES = 'underlying_entities'
 CONF_UNDERLYING_ENTITY_IDS = 'underlying_entity_ids'
 CONF_EVENT_NAME = 'event_name'
+CONF_EVENT = 'event'
+CONF_ARGUMENTS = 'arguments'
 CONF_BREATH_LENGTH = 'breath_length'      # Length of a single breath.
 CONF_LENGTH = 'length'
 

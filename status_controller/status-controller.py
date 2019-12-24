@@ -1,5 +1,6 @@
 import copy
 import datetime
+import json
 import logging
 import operator
 import os
@@ -414,6 +415,13 @@ class StatusController(threading.Thread):
         for mqtt in output.get(scc.CONF_MQTT):
           arguments = scc.get_event_arguments(
               self._config, event, mqtt, scc.CONF_MQTT)
+          # By default, the MQTT payload is the list of tags (json formatted).
+          if not scc.CONF_ACTION_MQTT_PAYLOAD in arguments:
+            arguments[scc.CONF_ACTION_MQTT_PAYLOAD] = json.dumps({
+                scc.CONF_EVENT: event,
+                scc.CONF_ARGUMENTS: arguments,
+            })
+
           mqtt_actions.append(actions.MQTTAction(
               self._app, self._report_action_finished, **arguments))
     return mqtt_actions

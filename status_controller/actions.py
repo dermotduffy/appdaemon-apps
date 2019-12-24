@@ -1,6 +1,5 @@
 import copy
 import datetime
-import json
 import random
 import time
 import threading
@@ -487,7 +486,7 @@ class MQTTAction(ServiceAction):
 
     self._notify_service = self._pop_argument(scc.CONF_SERVICE)
     self._topic = self._pop_argument(scc.CONF_ACTION_MQTT_TOPIC)
-    self._payload = self._pop_argument(scc.CONF_ACTION_MQTT_PAYLOAD, json.dumps(self._kwargs))
+    self._payload = self._pop_argument(scc.CONF_ACTION_MQTT_PAYLOAD)
 
   def action(self):
     super().action()
