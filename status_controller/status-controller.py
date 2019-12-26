@@ -179,7 +179,6 @@ class StatusController(threading.Thread):
 
     # Take the highest output priority, and use that as the event priority.
     outputs = self._get_matching_outputs(event)
-    self._app.log('out: %s' % outputs)
     for output in outputs:
       settings = scc.get_event_arguments(
           self._config,
