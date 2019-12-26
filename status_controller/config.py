@@ -146,7 +146,7 @@ DEFAULT_MESSAGE = 'The message was unset'
 DEFAULT_SONOS_CHIME_LENGTH = 3
 
 DEFAULT_MQTT_SERVICE = 'mqtt/publish'
-DEFAULT_MQTT_PAYLOAD = '{{ tags|json }}'
+DEFAULT_MQTT_PAYLOAD = '{{ tags|tojson }}'
 
 DEFAULT_FORCE = False
 MIN_PRIORITY = 0
