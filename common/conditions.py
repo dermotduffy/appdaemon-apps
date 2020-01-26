@@ -16,19 +16,17 @@ CONF_KIND_TRIGGER = 'trigger'
 DEFAULT_KIND = CONF_KIND_STATE
 VALID_KINDS = [CONF_KIND_STATE, CONF_KIND_TRIGGER]
 
-def ConstrainTime(fmt='%H:%M:%S'):
-  return lambda v: datetime.datetime.strptime(v, fmt).time()
-
 def ConstrainTimeRange(fmt='%H:%M:%S'):
-  return lambda v: tuple(
-      datetime.datetime.strptime(t, fmt).time() for t in v.split('-'))
+  return lambda v: tuple([
+      v.split('->')[0].strip(),
+      v.split('->')[1].strip()])
 
 CONFIG_CONDITION_BASE_SCHEMA = {
   vol.Optional(CONF_OR): vol.Self,
   vol.Optional(CONF_AND): vol.Self,
   vol.Optional(CONF_NOT): vol.Self,
-  vol.Optional(CONF_AFTER): ConstrainTime(),
-  vol.Optional(CONF_BEFORE): ConstrainTime(),
+  vol.Optional(CONF_AFTER): str,
+  vol.Optional(CONF_BEFORE): str,
   vol.Optional(CONF_BETWEEN): ConstrainTimeRange(),
   vol.Optional(CONF_KIND, default=DEFAULT_KIND): vol.In(VALID_KINDS),
   str: str,
@@ -46,17 +44,37 @@ def evaluator_NOT(app, current_time, key, condition, triggers,
       app, current_time, condition, triggers,
       evaluators, default_evaluator, operator, kind, **kwargs)
 
+def _parse_time(app, condition, key):
+  try:
+    return app.parse_time(condition)
+  except ValueError:
+    app.log("Warning: Could not convert '%s' to datetime in condition "
+             "evaluation. Configuration is incorrect. Condition will "
+             "always evaluate false: key='%s'" % (condition, key))
+  return None
+
 def evaluator_BEFORE(app, current_time, key, condition, triggers,
                      evaluators, default_evaluator, operator, kind, **kwargs):
-  return current_time < condition
+  val = _parse_time(app, condition, key)
+  if val is None:
+    return False
+  return current_time < val
+
 
 def evaluator_AFTER(app, current_time, key, condition, triggers,
                     evaluators, default_evaluator, operator, kind, **kwargs):
-  return current_time >= condition
+  val = _parse_time(app, condition, key)
+  if val is None:
+    return False
+  return current_time >= val
 
 def evaluator_BETWEEN(app, current_time, key, condition, triggers,
                       evaluators, default_evaluator, operator, kind, **kwargs):
-  start, end = condition
+  start = _parse_datetime(app, condition[0], key)
+  end = _parse_datetime(app, condition[1], key)
+
+  if start is None or end is None:
+    return False
   if start < end:
     return start <= current_time < end
   else:
