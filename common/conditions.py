@@ -70,8 +70,8 @@ def evaluator_AFTER(app, current_time, key, condition, triggers,
 
 def evaluator_BETWEEN(app, current_time, key, condition, triggers,
                       evaluators, default_evaluator, operator, kind, **kwargs):
-  start = _parse_datetime(app, condition[0], key)
-  end = _parse_datetime(app, condition[1], key)
+  start = _parse_time(app, condition[0], key)
+  end = _parse_time(app, condition[1], key)
 
   if start is None or end is None:
     return False
@@ -118,9 +118,9 @@ def evaluator_DEFAULT(app, current_time, key, condition, triggers,
       else: # >=
         return lval >= rval
   if kind == CONF_KIND_TRIGGER:
-    return key in triggers and triggers[key] == condition
+    return key in triggers and (triggers[key] == condition or condition == '*')
   else:
-    return app.get_state(key) == condition
+    return app.get_state(key) == condition or condition == '*'
 
 BASE_EVALUATORS = {
   CONF_AND: evaluator_AND_OR,
