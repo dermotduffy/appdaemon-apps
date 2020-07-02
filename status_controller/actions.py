@@ -424,7 +424,7 @@ class BreathingLightAction(LightActionBase):
 
     self._breathe_timer_handle = self._app.run_every(
         self._breathe,
-        self._app.datetime(),
+        'now',
         self._beat_length, **{})
 
   def complete_action(self, hard_kill_entities=None):
@@ -466,19 +466,13 @@ class NotifyAction(ServiceAction):
     super().__init__(app, complete_callback, **kwargs)
 
     self._notify_service = self._pop_argument(scc.CONF_SERVICE)
-    self._message = self._pop_argument(scc.CONF_MESSAGE)
-    self._title = self._pop_argument(scc.CONF_TITLE, None)
 
   def action(self):
     super().action()
     with self._lock:
       if self._is_finished:
         return
-    kwargs = { 'message': self._message }
-    if self._title is not None:
-      kwargs['title'] = self._title
-
-    self._call_service(self._notify_service, **kwargs)
+    self._call_service(self._notify_service, **self._kwargs)
 
 class MQTTAction(ServiceAction):
   def __init__(self, app, complete_callback, **kwargs):
