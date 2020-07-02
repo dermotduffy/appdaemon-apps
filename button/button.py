@@ -14,6 +14,7 @@ KEY_SERVICE = 'service'
 KEY_EVENT = 'event'
 KEY_DEVICE_IEEE = 'device_ieee'
 KEY_BRIGHTNESS_PCT = 'brightness_pct'
+KEY_BRIGHTNESS = 'brightness'
 
 KEY_ARGS = 'args'
 
@@ -38,12 +39,12 @@ class Button(hass.Hass):
     return data
 
   def handle_button_event(self, event_name, data, kwargs):
+    self.log('Received button event: (%s, %s, %s)' % (
+        event_name, data, kwargs))
+
     command = data.get(KEY_COMMAND)
     if command not in self.args:
       return
-
-    self.log('Received button event: (%s, %s, %s)' % (
-        event_name, data, kwargs))
 
     command_args = self.args.get(command)
     if command_args is None:
@@ -69,7 +70,7 @@ class Button(hass.Hass):
         service = 'turn_on'
 
       if KEY_BRIGHTNESS_PCT in data:
-        service_args[KEY_BRIGHTNESS_PCT] = data[KEY_BRIGHTNESS_PCT]
+        service_args[KEY_BRIGHTNESS] = int(255 * (float(data[KEY_BRIGHTNESS_PCT])/100))
 
       if service in ['turn_on']:
         self.turn_on_entities(entities_on or entities, **service_args)
