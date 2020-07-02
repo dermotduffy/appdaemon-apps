@@ -227,7 +227,7 @@ class AutoLights(hass.Hass):
     if self._status_var:
       self.run_every(
           self._update_status,
-          self.datetime(),
+          'now',
           STATUS_VAR_UPDATE_SECONDS)
 
   def _get_soft_timeout(self):
