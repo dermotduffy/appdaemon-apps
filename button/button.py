@@ -70,7 +70,11 @@ class Button(hass.Hass):
         service = 'turn_on'
 
       if KEY_BRIGHTNESS_PCT in data:
-        service_args[KEY_BRIGHTNESS] = int(255 * (float(data[KEY_BRIGHTNESS_PCT])/100))
+        try:
+          brightness_pct = float(data[KEY_BRIGHTNESS_PCT])
+          service_args[KEY_BRIGHTNESS] = int(255 * (brightness_pct / 100))
+        except ValueError:
+          pass
 
       if service in ['turn_on']:
         self.turn_on_entities(entities_on or entities, **service_args)
