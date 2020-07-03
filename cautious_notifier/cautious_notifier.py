@@ -78,6 +78,8 @@ class CautiousNotifier(hass.Hass):
         self.log('Trigger condition evaluates true: %s (%s: %s->%s)' % (
             condition, entity, old, new))
         self._trigger_evaluation_times[i] = self.datetime()
+      else:
+        return
 
     if not self._trigger_callback:
       # Keep the time we expect the timeout to fire, and use that as the
