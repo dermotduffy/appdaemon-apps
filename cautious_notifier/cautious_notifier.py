@@ -71,6 +71,8 @@ class CautiousNotifier(hass.Hass):
         self._suppress_evaluation_times[i] = self.datetime()
 
   def _handle_trigger_state(self, entity, attribute, old, new, kwargs):
+    schedule_evaluation = False
+
     for i in range(0, len(self._trigger_condition)):
       condition = self._trigger_condition[i]
       if conditions.evaluate_condition(
@@ -78,10 +80,9 @@ class CautiousNotifier(hass.Hass):
         self.log('Trigger condition evaluates true: %s (%s: %s->%s)' % (
             condition, entity, old, new))
         self._trigger_evaluation_times[i] = self.datetime()
-      else:
-        return
+        schedule_evaluation = True
 
-    if not self._trigger_callback:
+    if schedule_evaluation and not self._trigger_callback:
       # Keep the time we expect the timeout to fire, and use that as the
       # reference time to avoid appdaemon scheduling delays breaking the time
       # comparisons.
@@ -89,10 +90,14 @@ class CautiousNotifier(hass.Hass):
       kwargs[KEY_REFERENCE] = self.datetime() + datetime.timedelta(
           seconds=self._window_seconds)
 
+      self.log('Scheduling trigger evaluation in %i second(s)...' %
+          self._window_seconds)
       self._trigger_callback = self.run_in(
           self._trigger, self._window_seconds, **kwargs)
 
   def _trigger(self, kwargs=None):
+    self.log('Evaluating whether or not to fire an event...')
+
     self._trigger_callback = None
     reference = kwargs[KEY_REFERENCE]
 
