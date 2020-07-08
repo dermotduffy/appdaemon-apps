@@ -145,11 +145,12 @@ class StatusController(threading.Thread):
             if force:
               self._app.log(
                   'Found contended event. Force killing '
-                  'actions using in-scope entities. Event: %s' %event)
+                  'actions using in-scope entities. Event: %s, '
+                  'overlapping entities: %s' % (event, overlapping_entities))
               self._kill_actions_on_entities(entities_in_outputs)
             else:
-              self._app.log('Found contended event. Postponing. Event: %s'
-                  % event)
+              self._app.log('Found contended event. Postponing. Event: %s, '
+                  'overlapping entities: %s' % (event, overlapping_entities))
               continue
 
           self._events.remove(event_tpl)
