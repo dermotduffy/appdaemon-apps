@@ -262,7 +262,7 @@ class AutoLights(hass.Hass):
   def _get_best_matching_output(self):
     for output in self._config.get(CONF_OUTPUT):
       if conditions.evaluate_condition(
-          self, self.datetime().time(), output.get(CONF_CONDITION)):
+          self, self.datetime(), output.get(CONF_CONDITION)):
         return output
     return None
 
@@ -307,14 +307,12 @@ class AutoLights(hass.Hass):
   def _should_extend(self):
     return (self._config.get(CONF_EXTEND_CONDITION) and
         conditions.evaluate_condition(
-            self, self.datetime().time(),
-            self._config.get(CONF_EXTEND_CONDITION)))
+            self, self.datetime(), self._config.get(CONF_EXTEND_CONDITION)))
 
   def _is_disabled(self):
     return (self._config.get(CONF_DISABLE_CONDITION) and
         conditions.evaluate_condition(
-            self, self.datetime().time(),
-            self._config.get(CONF_DISABLE_CONDITION)))
+            self, self.datetime(), self._config.get(CONF_DISABLE_CONDITION)))
 
   def _main_timer_expire(self, kwargs):
     self.log('Main timer expired at %s' % self.datetime())
@@ -474,7 +472,7 @@ class AutoLights(hass.Hass):
     condition = self._config.get(
         CONF_TRIGGER_ACTIVATE_CONDITION if activate
         else CONF_TRIGGER_DEACTIVATE_CONDITION)
-    triggered = conditions.evaluate_condition(self, self.datetime().time(),
+    triggered = conditions.evaluate_condition(self, self.datetime(),
         condition, triggers={entity: new})
 
     activate_key = KEY_ACTIVATE if activate else KEY_DEACTIVATE

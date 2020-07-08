@@ -45,7 +45,7 @@ class StatusControllerApp(hass.Hass):
     self._status_controller.add(event)
 
 
-def evaluator_TAG(app, current_time, key, condition, triggers,
+def evaluator_TAG(app, current_datetime, key, condition, triggers,
                   evaluators, default_evaluator, operator, kind, **kwargs):
   return condition in kwargs['event'][scc.CONF_TAGS]
 
@@ -209,10 +209,10 @@ class StatusController(threading.Thread):
   def _get_matching_outputs(self, event) -> list:
     event_tags = event.get(scc.CONF_TAGS)
     matches = []
-    current_time = self._app.datetime().time()
+    current_datetime = self._app.datetime()
     for output in self._config.get(scc.CONF_OUTPUTS):
       if scc.CONF_CONDITION in output and not conditions.evaluate_condition(
-            self._app, self._app.datetime().time(), output[scc.CONF_CONDITION],
+            self._app, current_datetime, output[scc.CONF_CONDITION],
             evaluators=self._output_evaluators, event=event):
         continue
       matches.append(output)

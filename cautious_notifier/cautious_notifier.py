@@ -65,7 +65,7 @@ class CautiousNotifier(hass.Hass):
     for i in range(0, len(self._suppress_condition)):
       condition = self._suppress_condition[i]
       if conditions.evaluate_condition(
-          self, self.datetime().time(), [condition], triggers={entity: new}):
+          self, self.datetime(), [condition], triggers={entity: new}):
         self.log('Suppress condition evaluates true: %s (%s: %s->%s)' % (
             condition, entity, old, new))
         self._suppress_evaluation_times[i] = self.datetime()
@@ -76,7 +76,7 @@ class CautiousNotifier(hass.Hass):
     for i in range(0, len(self._trigger_condition)):
       condition = self._trigger_condition[i]
       if conditions.evaluate_condition(
-          self, self.datetime().time(), [condition], triggers={entity: new}):
+          self, self.datetime(), [condition], triggers={entity: new}):
         self.log('Trigger condition evaluates true: %s (%s: %s->%s)' % (
             condition, entity, old, new))
         self._trigger_evaluation_times[i] = self.datetime()
@@ -127,7 +127,7 @@ class CautiousNotifier(hass.Hass):
         return False
 
     if self._disable_condition and conditions.evaluate_condition(
-        self, self.datetime().time(), self._disable_condition):
+        self, self.datetime(), self._disable_condition):
       self.log('Disable condition \'%s\' evalutes true, skipping...' %
           self._disable_condition)
       return False

@@ -9,12 +9,15 @@ CONF_NOT = 'not'
 CONF_AFTER = 'after'
 CONF_BEFORE = 'before'
 CONF_BETWEEN = 'between'
+CONF_DAY = 'day'
 CONF_KIND = 'kind'
 CONF_KIND_STATE = 'state'
 CONF_KIND_TRIGGER = 'trigger'
 
 DEFAULT_KIND = CONF_KIND_STATE
 VALID_KINDS = [CONF_KIND_STATE, CONF_KIND_TRIGGER]
+
+VALID_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
 
 def ConstrainTimeRange(fmt='%H:%M:%S'):
   return lambda v: tuple([
@@ -28,47 +31,60 @@ CONFIG_CONDITION_BASE_SCHEMA = {
   vol.Optional(CONF_AFTER): str,
   vol.Optional(CONF_BEFORE): str,
   vol.Optional(CONF_BETWEEN): ConstrainTimeRange(),
+  vol.Optional(CONF_DAY):
+      vol.Any(vol.All(vol.Lower, vol.In(VALID_DAYS)),
+              [vol.All(vol.Lower, vol.In(VALID_DAYS))]),
   vol.Optional(CONF_KIND, default=DEFAULT_KIND): vol.In(VALID_KINDS),
   str: str,
 }
 
-def evaluator_AND_OR(app, current_time, key, condition, triggers,
+def evaluator_AND_OR(app, current_datetime, key, condition, triggers,
                      evaluators, default_evaluator, operator, kind, **kwargs):
   return evaluate_condition(
-      app, current_time, condition, triggers,
+      app, current_datetime, condition, triggers,
       evaluators, default_evaluator, key, kind, **kwargs)
 
-def evaluator_NOT(app, current_time, key, condition, triggers,
+def evaluator_NOT(app, current_datetime, key, condition, triggers,
                   evaluators, default_evaluator, operator, kind, **kwargs):
   return not evaluate_condition(
-      app, current_time, condition, triggers,
+      app, current_datetime, condition, triggers,
       evaluators, default_evaluator, operator, kind, **kwargs)
 
-def _parse_time(app, condition, key):
+def _parse_datetime(app, condition, key):
   try:
-    return app.parse_time(condition)
+    return app.parse_datetime(condition)
   except ValueError:
     app.log("Warning: Could not convert '%s' to datetime in condition "
              "evaluation. Configuration is incorrect. Condition will "
              "always evaluate false: key='%s'" % (condition, key))
   return None
 
-def evaluator_BEFORE(app, current_time, key, condition, triggers,
+def _parse_time(app, condition, key):
+  dt = _parse_datetime(app, condition, key)
+  return dt.time() if dt else None
+
+def evaluator_BEFORE(app, current_datetime, key, condition, triggers,
                      evaluators, default_evaluator, operator, kind, **kwargs):
   val = _parse_time(app, condition, key)
   if val is None:
     return False
-  return current_time < val
+  return current_datetime.time() < val
 
-
-def evaluator_AFTER(app, current_time, key, condition, triggers,
+def evaluator_AFTER(app, current_datetime, key, condition, triggers,
                     evaluators, default_evaluator, operator, kind, **kwargs):
   val = _parse_time(app, condition, key)
   if val is None:
     return False
-  return current_time >= val
+  return current_datetime.time() >= val
 
-def evaluator_BETWEEN(app, current_time, key, condition, triggers,
+def evaluator_DAY(app, current_datetime, key, condition, triggers,
+                  evaluators, default_evaluator, operator, kind, **kwargs):
+  current_day = current_datetime.strftime('%a').lower()
+  if type(condition) == list:
+    return current_day in condition
+  return current_day == condition
+
+def evaluator_BETWEEN(app, current_datetime, key, condition, triggers,
                       evaluators, default_evaluator, operator, kind, **kwargs):
   start = _parse_time(app, condition[0], key)
   end = _parse_time(app, condition[1], key)
@@ -76,11 +92,11 @@ def evaluator_BETWEEN(app, current_time, key, condition, triggers,
   if start is None or end is None:
     return False
   if start < end:
-    return start <= current_time < end
+    return start <= current_datetime.time() < end
   else:
-    return start <= current_time or current_time < end
+    return start <= current_datetime.time() or current_datetime.time() < end
 
-def evaluator_DEFAULT(app, current_time, key, condition, triggers,
+def evaluator_DEFAULT(app, current_datetime, key, condition, triggers,
                       evaluators, default_evaluator, operator, kind, **kwargs):
   for numeric_operator in ('<=', '<', '>=', '>'):
     if condition.startswith(numeric_operator):
@@ -129,9 +145,10 @@ BASE_EVALUATORS = {
   CONF_AFTER: evaluator_AFTER,
   CONF_BEFORE: evaluator_BEFORE,
   CONF_BETWEEN: evaluator_BETWEEN,
+  CONF_DAY: evaluator_DAY,
 }
 
-def evaluate_condition(app, current_time, condition_set,
+def evaluate_condition(app, current_datetime, condition_set,
                        triggers=None,
                        evaluators=BASE_EVALUATORS,
                        default_evaluator=evaluator_DEFAULT, operator=CONF_AND,
@@ -143,11 +160,11 @@ def evaluate_condition(app, current_time, condition_set,
     for key in {k:v for (k, v) in condition.items() if k != CONF_KIND}:
       if key in evaluators:
         intermediate_value = evaluators[key](
-            app, current_time, key, condition[key], triggers,
+            app, current_datetime, key, condition[key], triggers,
             evaluators, default_evaluator, operator, kind, **kwargs)
       else:
         intermediate_value = default_evaluator(
-            app, current_time, key, condition[key], triggers,
+            app, current_datetime, key, condition[key], triggers,
             evaluators, default_evaluator, operator, kind, **kwargs)
 
       if KEY_DEBUG in kwargs and kwargs[DEBUG] == True:
