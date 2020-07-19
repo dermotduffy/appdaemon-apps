@@ -136,12 +136,12 @@ class SonosAction(TimedActionBase):
   @classmethod
   def capture_global_sonos_state(cls, app):
     scc.log(app, cls, 'Saving global snapshot')
-    app.call_service(SONOS_SERVICE_SNAPSHOT)
+    app.call_service(SONOS_SERVICE_SNAPSHOT, entity_id='all')
 
   @classmethod
   def restore_global_sonos_state(cls, app):
     scc.log(app, cls, 'Restoring global snapshot')
-    app.call_service(SONOS_SERVICE_RESTORE)
+    app.call_service(SONOS_SERVICE_RESTORE, entity_id='all')
 
   def _stop_media(self):
     with self._lock:
