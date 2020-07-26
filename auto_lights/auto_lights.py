@@ -259,10 +259,11 @@ class AutoLights(hass.Hass):
         state_entities.append(deactivate_entity)
     return state_entities
 
-  def _get_best_matching_output(self):
+  def _get_best_matching_output(self, triggers=None):
     for output in self._config.get(CONF_OUTPUT):
       if conditions.evaluate_condition(
-          self, self.datetime(), output.get(CONF_CONDITION)):
+          self, self.datetime(), output.get(CONF_CONDITION),
+          triggers=triggers):
         return output
     return None
 
@@ -459,6 +460,10 @@ class AutoLights(hass.Hass):
     self.log('Trigger callback (activate=%s): %s (old: %s, new: %s)' % (
         activate, entity, old, new))
 
+    if old == 'unavailable':
+      self.log('Unavailable: Skipping previously unavailable state for: %s' % entity)
+      return
+
     if self._is_disabled():
       self.log('Disabled: Skipping trigger for: %s' % entity)
       return
@@ -469,16 +474,17 @@ class AutoLights(hass.Hass):
       self.log('Manual mode: Skipping trigger for: %s' % entity)
       return
 
+    triggers={entity: new}
     condition = self._config.get(
         CONF_TRIGGER_ACTIVATE_CONDITION if activate
         else CONF_TRIGGER_DEACTIVATE_CONDITION)
     triggered = conditions.evaluate_condition(self, self.datetime(),
-        condition, triggers={entity: new})
+        condition, triggers=triggers)
 
     activate_key = KEY_ACTIVATE if activate else KEY_DEACTIVATE
 
     if triggered:
-      output = self._get_best_matching_output()
+      output = self._get_best_matching_output(triggers=triggers)
       if output:
         # Prune last actions list.
         self._prune_last_actions()
