@@ -57,7 +57,7 @@ STATUS_VAR_ATTR_ICON = 'icon'
 
 STATUS_VAR_ICONS = {
     STATUS_VAR_STATE_MANUAL: 'mdi:hand-left',
-    STATUS_VAR_STATE_ACTIVE_TIMER: 'mdi:timer',
+    STATUS_VAR_STATE_ACTIVE_TIMER: 'mdi:timer-outline',
     STATUS_VAR_STATE_WAITING: 'mdi:sleep',
     STATUS_VAR_STATE_PAUSED: 'mdi:pause',
     STATUS_VAR_STATE_DISABLED: 'mdi:block-helper',
@@ -524,6 +524,8 @@ class AutoLights(hass.Hass):
         else:
           if activate:
             self._main_timer.create(self._get_soft_timeout())
+          else:
+            self._main_timer.cancel()
           self._activate(output, activate=activate)
 
         self._last_trigger[activate_key] = self.get_state(
