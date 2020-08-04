@@ -135,9 +135,9 @@ def evaluator_DEFAULT(app, current_datetime, key, condition, triggers,
         else: # >=
           return lval >= rval
   if kind == CONF_KIND_TRIGGER:
-    return key in triggers and (triggers[key] == condition or condition == '*')
+    return key in triggers and (triggers[key] == str(condition) or condition == '*')
   else:
-    return app.get_state(key) == condition or condition == '*'
+    return app.get_state(key) == str(condition) or condition == '*'
 
 BASE_EVALUATORS = {
   CONF_AND: evaluator_AND_OR,
