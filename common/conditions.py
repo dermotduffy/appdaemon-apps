@@ -35,7 +35,7 @@ CONFIG_CONDITION_BASE_SCHEMA = {
       vol.Any(vol.All(vol.Lower, vol.In(VALID_DAYS)),
               [vol.All(vol.Lower, vol.In(VALID_DAYS))]),
   vol.Optional(CONF_KIND, default=DEFAULT_KIND): vol.In(VALID_KINDS),
-  str: str,
+  str: vol.Any(str, bool),
 }
 
 def evaluator_AND_OR(app, current_datetime, key, condition, triggers,
@@ -98,41 +98,42 @@ def evaluator_BETWEEN(app, current_datetime, key, condition, triggers,
 
 def evaluator_DEFAULT(app, current_datetime, key, condition, triggers,
                       evaluators, default_evaluator, operator, kind, **kwargs):
-  for numeric_operator in ('<=', '<', '>=', '>'):
-    if condition.startswith(numeric_operator):
-      if kind == CONF_KIND_TRIGGER:
-        if key not in triggers:
+  if type(condition) == str:
+    for numeric_operator in ('<=', '<', '>=', '>'):
+      if condition.startswith(numeric_operator):
+        if kind == CONF_KIND_TRIGGER:
+          if key not in triggers:
+            return False
+          lval_str = triggers[key]
+        else:
+          lval_str = app.get_state(key)
+        rval_str =  condition[len(numeric_operator):]
+
+        try:
+          rval = float(rval_str)
+        except ValueError:
+          app.log("Warning: Could not convert '%s' to rval float in condition "
+                  "evaluation. Configuration is incorrect. Condition will "
+                  "always evaluate false: key='%s', condition='%s'" % (
+              (rval_str, key, condition)))
           return False
-        lval_str = triggers[key]
-      else:
-        lval_str = app.get_state(key)
-      rval_str =  condition[len(numeric_operator):]
 
-      try:
-        rval = float(rval_str)
-      except ValueError:
-        app.log("Warning: Could not convert '%s' to rval float in condition "
-                "evaluation. Configuration is incorrect. Condition will "
-                "always evaluate false: key='%s', condition='%s'" % (
-            (rval_str, key, condition)))
-        return False
+        try:
+          lval = float(lval_str)
+        except ValueError:
+          app.log("Warning: Could not convert '%s' to lval float in condition "
+                  "evaluation. Condition will always evaluate false: "
+                  "key='%s', condition='%s'" % (lval_str, key, condition))
+          return False
 
-      try:
-        lval = float(lval_str)
-      except ValueError:
-        app.log("Warning: Could not convert '%s' to lval float in condition "
-                "evaluation. Condition will always evaluate false: "
-                "key='%s', condition='%s'" % (lval_str, key, condition))
-        return False
-
-      if numeric_operator == '<=':
-        return lval <= rval
-      elif numeric_operator == '<':
-        return lval < rval
-      elif numeric_operator == '>':
-        return lval > rval
-      else: # >=
-        return lval >= rval
+        if numeric_operator == '<=':
+          return lval <= rval
+        elif numeric_operator == '<':
+          return lval < rval
+        elif numeric_operator == '>':
+          return lval > rval
+        else: # >=
+          return lval >= rval
   if kind == CONF_KIND_TRIGGER:
     return key in triggers and (triggers[key] == condition or condition == '*')
   else:
